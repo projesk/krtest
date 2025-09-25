@@ -4,13 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kraujo tyrimų analizė (beta)</title>
-  <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas arba PDF. OCR vykdomas naršyklėje.">
+  <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas arba PDF. OCR vykdomas tik naršyklėje.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="icon" href="data:,">
-  <!-- OCR -->
+  <!-- Tesseract OCR -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <!-- PDF -> canvas -->
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.js"></script>
+  <!-- PDF.js (stabili 3.11) + worker -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  </script>
   <style>
     .dropzone { border: 2px dashed rgba(0,0,0,0.2); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -21,7 +25,7 @@
     <header class="mb-6">
       <h1 class="text-2xl sm:text-3xl font-semibold">Kraujo tyrimų analizė (beta)</h1>
       <p class="text-sm text-gray-600 mt-2">
-        Įkelkite laboratorinių tyrimų <b>nuotraukas arba PDF</b>. Apdorojimas vyksta tik Jūsų įrenginyje.
+        Įkelkite laboratorinių tyrimų <b>nuotraukas arba PDF</b> (pvz., CBC, biochemija). Apdorojimas vyksta tik Jūsų įrenginyje.
       </p>
     </header>
 
@@ -49,10 +53,6 @@
       <details class="mt-4">
         <summary class="text-sm font-medium cursor-pointer">Išplėstiniai nustatymai</summary>
         <div class="mt-3 space-y-2 text-sm">
-          <label class="flex items-center gap-2">
-            <input id="langLt" type="checkbox" checked>
-            <span>Naudoti lietuvių kalbos modelį (jei prieinamas)</span>
-          </label>
           <label class="flex items-center gap-2">
             <input id="aggressive" type="checkbox">
             <span>Agresyvesnis lentelių/diag. išgavimas</span>
@@ -114,7 +114,7 @@
         </table>
       </div>
 
-      <details class="mt-4" id="debugBox" class="hidden">
+      <details class="mt-4" id="debugBox">
         <summary class="text-sm font-medium cursor-pointer">Debug informacija</summary>
         <div class="text-xs text-gray-700 mt-2 space-y-1 mono">
           <div id="dbgCounts"></div>
@@ -261,7 +261,7 @@ drop.addEventListener("drop",(e)=>{ e.preventDefault(); drop.classList.remove("b
 });
 input.addEventListener("change",(e)=>{ files=[...e.target.files]; statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių failų."; });
 
-// Vaizdo pagerinimas
+// Vaizdo pagerinimas (binarizacija)
 async function fileToEnhancedBlob(file) {
   const img = await new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -287,7 +287,13 @@ async function fileToEnhancedBlob(file) {
 // PDF -> PNG puslapiai
 async function pdfToImageBlobs(file, scale = 2.0) {
   const arrayBuf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+  let pdf;
+  try {
+    pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+  } catch (e) {
+    console.error("PDF open error:", e);
+    throw new Error("Nepavyko atidaryti PDF (gal sugadintas failas?)");
+  }
   const blobs = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
@@ -336,10 +342,11 @@ startBtn.addEventListener("click", async () => {
   startBtn.disabled=true;
   tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden");
   results.classList.remove("hidden"); statusEl.textContent="Vyksta OCR…";
-  const useLt=$("langLt").checked, aggressive=$("aggressive").checked;
+  const aggressive=$("aggressive").checked;
 
   try{
-    const worker = await Tesseract.createWorker(useLt ? "lit+eng" : "eng", 1, {});
+    // Tik ENG modelis – stabilu
+    const worker = await Tesseract.createWorker("eng", 1, {});
     await worker.setParameters({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.%/^-–—()µgdlpmnIUFLcu ",
       preserve_interword_spaces: "1",
@@ -393,7 +400,7 @@ startBtn.addEventListener("click", async () => {
       lines = naiveLines;
     }
 
-    // Debug
+    // Debug langelis
     if (debugMode.checked) {
       debugBox.open = true;
       dbgCounts.innerHTML = `Žodžiai: <b>${allWords.length}</b> • Eilutės: <b>${lines.length}</b> • Paveikslai: <b>${totalImages}</b>`;
@@ -405,7 +412,7 @@ startBtn.addEventListener("click", async () => {
 
     // Analizė
     let rows = analyzeText(lines.join("\n"),{aggressive});
-    // 4) jei analizė vis tiek tuščia – „grubus“ skaičių gaudymas iš raw teksto
+    // 4) jei analizė vis tiek tuščia – „grubus“ skaičių gaudymas
     if (!rows.length) {
       rows = bruteExtract(raw.textContent);
     }
@@ -415,7 +422,8 @@ startBtn.addEventListener("click", async () => {
     statusEl.textContent = rows.length ? `Rasta įrašų: ${rows.length}` : "Nepavyko aptikti lentelės. Pabandykite aiškesnę nuotrauką/PDF arba priartinkite tik lentelę.";
   }catch(err){
     console.error(err);
-    statusEl.textContent="Įvyko klaida apdorojant. Pamėginkite dar kartą.";
+    const msg = (err && err.message) ? err.message : String(err);
+    statusEl.textContent="Įvyko klaida apdorojant: " + msg;
   }finally{
     startBtn.disabled=false;
   }
