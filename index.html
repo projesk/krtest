@@ -9,7 +9,7 @@
   <link rel="icon" href="data:,">
   <!-- Tesseract OCR -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <!-- PDF.js (stabili 3.11) + worker -->
+  <!-- PDF.js (3.11) + worker -->
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -25,19 +25,19 @@
     <header class="mb-6">
       <h1 class="text-2xl sm:text-3xl font-semibold">Kraujo tyrimų analizė (beta)</h1>
       <p class="text-sm text-gray-600 mt-2">
-        Įkelkite laboratorinių tyrimų <b>nuotraukas arba PDF</b> (pvz., CBC, biochemija). Apdorojimas vyksta tik Jūsų įrenginyje.
+        Įkelkite laboratorinių tyrimų <b>nuotraukas arba PDF</b>. Viskas vyksta tik Jūsų įrenginyje.
       </p>
     </header>
 
     <div class="bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm rounded-lg p-3 mb-6">
-      <b>Svarbu:</b> tai <u>ne</u> medicininė diagnozė ir <u>ne</u> gydymo rekomendacija. Dėl rezultatų interpretacijos <b>kreipkitės į gydytoją</b>.
+      <b>Svarbu:</b> tai <u>ne</u> medicininė diagnozė ir <u>ne</u> gydymo rekomendacija. Rezultus interpretuoja gydytojas.
     </div>
 
     <!-- Įkėlimas -->
     <section class="mb-6">
       <div id="drop" class="dropzone rounded-xl p-6 bg-white text-center cursor-pointer">
         <p class="text-sm text-gray-600">Nutempkite failus čia arba paspauskite, kad pasirinktumėte.</p>
-        <p class="text-xs text-gray-400 mt-1">Leidžiami: JPG, PNG, WEBP, HEIC (jei palaiko), PDF.</p>
+        <p class="text-xs text-gray-400 mt-1">Leidžiami: JPG, PNG, WEBP, HEIC (jei palaikoma), PDF.</p>
         <input id="fileInput" type="file" accept="image/*,application/pdf" multiple class="hidden">
       </div>
 
@@ -146,7 +146,7 @@ const HL_RX    = /\b([HL])\b/;
 const RANGE_RX = /(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/;
 
 // Vienetai + normalizacija
-const UNIT_RX = /(g\/L|g\/dL|g%|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|10\^3\/u?L|10\^9\/u?L|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm|mg\/L|%|s|sec|sek|min|fL|fl|pg)/i;
+const UNIT_RX = /(g\/L|g\/dL|g%|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|10\^3\/u?L|10\^9\/u?L|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm|mg\/L|%|s|sec|sek|min|fL|fl|pg|L\/L)/i;
 function normalizeUnits(u){
   if(!u) return u;
   u = u.replace(/\s+/g,"");
@@ -176,10 +176,10 @@ const NOTES = {
 // Išplėsti sinonimai
 const TEST_MAP = [
   {rx:/\b(HGB|Hb|ha?emoglobi?n[eai]?s?)\b/i, name:"Hemoglobinas"},
-  {rx:/\b(HCT|hematokrit(as)?|PCV)\b/i, name:"Hematokritas"},
+  {rx:/\b(HCT|hematokrit(as)?|PCV|ha?ematocrit)\b/i, name:"Hematokritas"},
   {rx:/\b(RBC(\s*Count)?|erythrocyt(es?|e)?|eritrocit(ai|ų)?)\b/i, name:"Eritrocitai"},
   {rx:/\b((Total\s*)?WBC(\s*Count)?|leukocyt(es?|e)?|leukocit(ai|ų)?)\b/i, name:"Leukocitai"},
-  {rx:/\b(PLT|Platelet(\s*Count)?|trombocit(ai|ų)?)\b/i, name:"Trombocitai"},
+  {rx:/\b(PLT|Platelet(\s*Count)?|trombocit(ai|ų)?|Platelets)\b/i, name:"Trombocitai"},
   {rx:/\bMCV\b/i, name:"MCV"},
   {rx:/\bMCH\b/i, name:"MCH"},
   {rx:/\bMCHC\b/i, name:"MCHC"},
@@ -211,7 +211,7 @@ const TEST_MAP = [
 // Tipinės ribos
 const TYPICAL = {
   "Hemoglobinas":   { units:["g/dL","g/L"], ranges:[{u:"g/dL", lo:12, hi:16},{u:"g/L", lo:120, hi:160}] },
-  "Hematokritas":   { units:["%"], ranges:[{u:"%", lo:36, hi:46}] },
+  "Hematokritas":   { units:["%","L/L"], ranges:[{u:"%", lo:36, hi:46},{u:"L/L", lo:0.36, hi:0.46}] },
   "Eritrocitai":    { units:["x10^12/L","10^12/L"], ranges:[{u:"x10^12/L", lo:3.8, hi:5.2},{u:"10^12/L", lo:3.8, hi:5.2}] },
   "Leukocitai":     { units:["x10^9/L","10^9/L","/µL","/mm3","10^3/µL"], ranges:[
     {u:"x10^9/L", lo:4.0, hi:10.0},{u:"10^9/L", lo:4.0, hi:10.0},
@@ -233,20 +233,12 @@ const TYPICAL = {
   "TSH":            { units:["mIU/L","µIU/mL"], ranges:[{u:"mIU/L", lo:0.4, hi:4.0},{u:"µIU/mL", lo:0.4, hi:4.0}] },
   "FT4":            { units:["pmol/L","ng/dL"], ranges:[{u:"pmol/L", lo:12, hi:22},{u:"ng/dL", lo:0.9, hi:1.7}] },
   "Vit D":          { units:["ng/mL","nmol/L"], ranges:[{u:"ng/mL", lo:20, hi:50},{u:"nmol/L", lo:50, hi:125}] },
-  "MCV":            { units:["fL","fl"], ranges:[{u:"fL", lo:80, hi:99},{u:"fl", lo:80, hi:99}] },
-  "MCH":            { units:["pg"],      ranges:[{u:"pg", lo:28, hi:32}] },
-  "MCHC":           { units:["g/dL"],    ranges:[{u:"g/dL", lo:30, hi:34}] },
-  // Krešumas
-  "INR":            { units:["","vnt"], ranges:[{u:"", lo:0.8, hi:1.2},{u:"vnt", lo:0.8, hi:1.2}] },
-  "Protrombino laikas (PT)": { units:["s","sek","sec"], ranges:[{u:"s", lo:11, hi:15},{u:"sek", lo:11, hi:15},{u:"sec", lo:11, hi:15}] },
-  "aPTT":           { units:["s","sek","sec"], ranges:[{u:"s", lo:25, hi:35},{u:"sek", lo:25, hi:35},{u:"sec", lo:25, hi:35}] },
-  "Fibrinogenas":   { units:["g/L"], ranges:[{u:"g/L", lo:2.0, hi:4.0}] },
-  "D-dimerai":      { units:["mg/L","mg/L FEU","µg/mL","µg/mL FEU"], ranges:[
-    {u:"mg/L", lo:0, hi:0.5},{u:"mg/L FEU", lo:0, hi:0.5},{u:"µg/mL", lo:0, hi:0.5},{u:"µg/mL FEU", lo:0, hi:0.5}
-  ]},
+  "MCV":            { units:["fL","fl"], ranges:[{u:"fL", lo:83, hi:101},{u:"fl", lo:83, hi:101}] },
+  "MCH":            { units:["pg"],      ranges:[{u:"pg", lo:27, hi:32}] },
+  "MCHC":           { units:["g/dL"],    ranges:[{u:"g/dL", lo:32, hi:36}] },
 };
 
-// UI
+// UI / failai
 const drop = $("drop"), input=$("fileInput"), startBtn=$("startBtn"), statusEl=$("status");
 const results = $("results"), tbody=$("tbody"), raw=$("raw"), exportCsv=$("exportCsv"), clearBtn=$("clearBtn");
 const coagWrap = $("coagWrap"), coagTbody = $("coagTbody");
@@ -260,6 +252,19 @@ drop.addEventListener("drop",(e)=>{ e.preventDefault(); drop.classList.remove("b
   statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių failų.";
 });
 input.addEventListener("change",(e)=>{ files=[...e.target.files]; statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių failų."; });
+
+// --------- Nauja: eilučių normalizavimas (taškai, vienetai, tarpai) ----------
+function normalizeLine(s){
+  if(!s) return s;
+  s = s.replace(/[\u00B7\u2219\u2022\u2027]/g, '.');         // · ∙ • ‧
+  s = s.replace(/(\d)\s*[.,·∙•]\s*(\d)/g, '$1.$2');          // 30 . 5 -> 30.5 ; 0 , 35 -> 0.35
+  s = s.replace(/10\*([0-9])\s*\/\s*[uµ]?[Ll]/gi, '10^$1/µL'); // 10*9/L -> 10^9/µL
+  s = s.replace(/\/u[lL]/g, '/µL');                           // /uL -> /µL
+  s = s.replace(/\bfl\b/g, 'fL');                             // fl -> fL
+  s = s.replace(/\bl\/l\b/gi, 'L/L');                         // l/l -> L/L
+  s = s.replace(/\s{2,}/g, ' ').trim();                       // sutraukti tarpus
+  return s;
+}
 
 // Vaizdo pagerinimas (binarizacija)
 async function fileToEnhancedBlob(file) {
@@ -345,7 +350,6 @@ startBtn.addEventListener("click", async () => {
   const aggressive=$("aggressive").checked;
 
   try{
-    // Tik ENG modelis – stabilu
     const worker = await Tesseract.createWorker("eng", 1, {});
     await worker.setParameters({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.%/^-–—()µgdlpmnIUFLcu ",
@@ -388,19 +392,21 @@ startBtn.addEventListener("click", async () => {
 
     // 1) bbox griežtas
     let lines = groupWordsIntoLines(allWords);
+    lines = lines.map(normalizeLine);
 
     // 2) bbox laisvas, jei mažai
     if (!lines || lines.length < 5) {
       lines = groupWordsIntoLinesLoose(allWords);
+      lines = lines.map(normalizeLine);
     }
 
     // 3) jei vis dar trūksta – raw text eilutės
     if (!lines || lines.length < 3) {
       const naiveLines = raw.textContent.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-      lines = naiveLines;
+      lines = naiveLines.map(normalizeLine);
     }
 
-    // Debug langelis
+    // Debug
     if (debugMode.checked) {
       debugBox.open = true;
       dbgCounts.innerHTML = `Žodžiai: <b>${allWords.length}</b> • Eilutės: <b>${lines.length}</b> • Paveikslai: <b>${totalImages}</b>`;
@@ -410,62 +416,16 @@ startBtn.addEventListener("click", async () => {
       debugBox.open = false;
     }
 
-   // Analizė (1) – bandome skaityti stulpeliais
-let rows = analyzeByColumns(lines);
+    // Analizė (1) – bandome skaityti stulpeliais
+    let rows = analyzeByColumns(lines);
 
-// Jei stulpelinis pagavo per mažai, krentame į senąjį parserį
-if (rows.length < 4) {
-  rows = analyzeText(lines.join("\n"), { aggressive });
-  // Galutinis „grubus“ fallback
-  if (!rows.length) {
-    rows = bruteExtract(raw.textContent);
-  }
-}
-<script>
-// --- Nauja: stulpelinė analizė (TEST | RESULT | RANGE | UNITS) ---
-function analyzeByColumns(lines){
-  const rows = [];
-  // pabandom rasti antraštę; jei nerandam — vis tiek skenuosim nuo pradžios
-  let start = lines.findIndex(s => /\bTEST\b/i.test(s) && /\bRESULT\b/i.test(s));
-  if (start < 0) start = 0;
-
-  for (let i = start + 1; i < lines.length; i++){
-    const s = lines[i];
-    if (!s || /^[-\s]*$/.test(s) || /end of report/i.test(s)) continue;
-
-    // dalinam pagal ≥2 tarpus (dažniausia PDF lentelių forma)
-    const parts = s.split(/\s{2,}/).map(t => t.trim()).filter(Boolean);
-    if (parts.length < 2) continue;
-
-    const nameRaw = parts[0];
-    const hit = TEST_MAP.find(m => m.rx.test(nameRaw));
-    if (!hit) continue;
-
-    // RESULT — dažniausiai parts[1]
-    const mVal = (parts[1].match(/-?\d+(?:[.,]\d+)?/) || [])[0];
-    const value = DEC(mVal);
-
-    // RANGE — dažniausiai parts[2]
-    let lo = null, hi = null, range = "";
-    const r = (parts[2] || "").match(/(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/);
-    if (r){ lo = DEC(r[1]); hi = DEC(r[2]); range = `${r[1]}–${r[2]}`; }
-
-    // UNITS — dažniausiai parts[3], bet neretai būna ir parts[2] arba net tame pačiame su RESULT
-    let units = "";
-    const um = (parts[3] || parts[2] || parts[1] || "").match(/(g\/L|g\/dL|g%|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|10\^3\/u?L|10\^9\/u?L|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm|mg\/L|%|s|sec|sek|min|fL|fl|pg)/i);
-    if (um) units = normalizeUnits(um[1]);
-
-    let tag = "Neaišku";
-    if (value!=null && lo!=null && hi!=null) tag = value<lo ? "Žemas" : (value>hi ? "Aukštas" : "Normoje");
-
-    rows.push({
-      name: hit.name, value, units: units||"", range, lo, hi, tag,
-      note: "", typicalFallback: false, source: s
-    });
-  }
-  return rows;
-}
-</script>
+    // Jei stulpelinis pagavo per mažai – senasis parseris, tada grubus fallback
+    if (rows.length < 4) {
+      rows = analyzeText(lines.join("\n"), { aggressive });
+      if (!rows.length) {
+        rows = bruteExtract(raw.textContent);
+      }
+    }
 
     renderRows(rows);
     renderCoagAlert(rows);
@@ -482,7 +442,7 @@ function analyzeByColumns(lines){
 // „Grubus“ fallback: spėja pavadinimą + skaičių vienoje eilutėje
 function bruteExtract(text){
   const out=[];
-  const lines=text.split(/\r?\n/).map(s=>s.replace(/\s{2,}/g," ").trim()).filter(Boolean);
+  const lines=text.split(/\r?\n/).map(s=>normalizeLine(s)).filter(Boolean);
   for(const ln of lines){
     const hit = TEST_MAP.find(m=>m.rx.test(ln));
     if(!hit) continue;
@@ -495,9 +455,48 @@ function bruteExtract(text){
   return out;
 }
 
-// Pagrindinis parseris
+// --- Nauja: stulpelinė analizė (TEST | RESULT | RANGE | UNITS) ---
+function analyzeByColumns(lines){
+  const rows = [];
+  let start = lines.findIndex(s => /\bTEST\b/i.test(s) && /\bRESULT\b/i.test(s));
+  if (start < 0) start = 0;
+
+  for (let i = start + 1; i < lines.length; i++){
+    const s = normalizeLine(lines[i]);
+    if (!s || /^[-\s]*$/.test(s) || /end of report/i.test(s)) continue;
+
+    const parts = s.split(/\s{2,}/).map(t => t.trim()).filter(Boolean);
+    if (parts.length < 2) continue;
+
+    const nameRaw = parts[0];
+    const hit = TEST_MAP.find(m => m.rx.test(nameRaw));
+    if (!hit) continue;
+
+    const mVal = (parts[1].match(/-?\d+(?:[.,]\d+)?/) || [])[0];
+    const value = DEC(mVal);
+
+    let lo = null, hi = null, range = "";
+    const r = (parts[2] || "").match(/(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/);
+    if (r){ lo = DEC(r[1]); hi = DEC(r[2]); range = `${r[1]}–${r[2]}`; }
+
+    let units = "";
+    const um = (parts[3] || parts[2] || parts[1] || "").match(UNIT_RX);
+    if (um) units = normalizeUnits(um[1]);
+
+    let tag = "Neaišku";
+    if (value!=null && lo!=null && hi!=null) tag = value<lo ? "Žemas" : (value>hi ? "Aukštas" : "Normoje");
+
+    rows.push({
+      name: hit.name, value, units: units||"", range, lo, hi, tag,
+      note: "", typicalFallback: false, source: s
+    });
+  }
+  return rows;
+}
+
+// Pagrindinis parseris (eilutėmis)
 function analyzeText(text,{aggressive=false}={}){
-  const lines = text.split(/\r?\n/).map(s=>s.replace(/\t+/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
+  const lines = text.split(/\r?\n/).map(s=>normalizeLine(s)).filter(Boolean);
   const results=[], windowSize=2;
   for(let i=0;i<lines.length;i++){
     const line=lines[i];
@@ -508,7 +507,6 @@ function analyzeText(text,{aggressive=false}={}){
     let value=null, units=null, flag=null;
     const hl=line.match(HL_RX); if(hl) flag=hl[1].toUpperCase()==="H"?"H":"L";
 
-    // Reikšmė šioje arba sekančiose 1–2 eilutėse
     let m = line.match(/(-?\d+(?:[.,]\d+)?)/);
     if (m) value = DEC(m[1]);
     if (value==null) {
@@ -519,10 +517,8 @@ function analyzeText(text,{aggressive=false}={}){
       }
     }
 
-    // Vienetai
     const um=line.match(UNIT_RX); if(um) units=normalizeUnits(um[1]);
 
-    // Ribos – ši/greta
     let lo=null, hi=null, rangeText=null, r=line.match(RANGE_RX);
     if(!r){
       for(let k=1;k<=windowSize && i+k<lines.length;k++){ r=lines[i+k].match(RANGE_RX); if(r) break; }
@@ -530,7 +526,6 @@ function analyzeText(text,{aggressive=false}={}){
     }
     if(r){ lo=DEC(r[1]); hi=DEC(r[2]); rangeText=`${r[1]}–${r[2]}`; }
 
-    // Tipinės ribos – jei laboratorija nenurodė
     let usedTypical=false;
     if((lo==null || hi==null) && name in TYPICAL){
       const t=TYPICAL[name];
@@ -553,7 +548,6 @@ function analyzeText(text,{aggressive=false}={}){
     results.push({name, value, units:units||"", range:rangeText||"", lo, hi, tag, note, typicalFallback:usedTypical, source:line});
   }
 
-  // sujungiam dublikatus
   const merged=new Map();
   for(const r of results){
     const key=r.name+"|"+(r.units||"");
