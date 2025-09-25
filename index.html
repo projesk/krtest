@@ -302,17 +302,18 @@ async function pdfToImageBlobs(file, scale = 2.0) {
 }
 
 /* Iš žodžių (bbox) sudedame eilutes */
-function groupWordsIntoLines(words){
-  const good = words.filter(w => (w.conf ?? 0) >= 40 && w.text && w.text.trim());
+function groupWordsIntoLinesLoose(words){
+  if (!words || !words.length) return [];
+  const good = words.filter(w => (w.text||"").trim()); // be conf filtro
   good.sort((a,b)=> a.y0 - b.y0 || a.x0 - b.x0);
-  const lines = [], TOL = 10;
+  const lines = [], TOL = 16; // platesnė tolerancija
   for(const w of good){
     let line = lines.find(L => Math.abs(L.y - w.y0) < TOL);
     if(!line){ line = { y: w.y0, words: [] }; lines.push(line); }
     line.words.push(w);
   }
   for(const L of lines){ L.words.sort((a,b)=> a.x0 - b.x0); L.text = L.words.map(w=>w.text).join(" "); }
-  return lines.map(L => L.text);
+  return lines.map(L => L.text).filter(s=>s.trim());
 }
 
 /* Pagrindinis veiksmas */
@@ -324,13 +325,14 @@ startBtn.addEventListener("click", async () => {
   const useLt=$("langLt").checked, aggressive=$("aggressive").checked;
 
   try{
-    const worker = await Tesseract.createWorker(useLt ? "lit+eng" : "eng", 1, {});
-    await worker.setParameters({
-      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.%/^-–—()µgdlpmnIUFLcu ",
-      preserve_interword_spaces: "1",
-      user_defined_dpi: "300",
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK
-    });
+const worker = await Tesseract.createWorker(useLt ? "lit+eng" : "eng", 1, {});
+await worker.setParameters({
+  tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.%/^-–—()µgdlpmnIUFLcu ",
+  preserve_interword_spaces: "1",
+  user_defined_dpi: "300",
+  tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+  tessedit_do_invert: "1"          // 👈 pridėta eilutė (padeda „išbalintiems“ skenams)
+});
 
     let allText = "", allWords = [];
 
@@ -362,11 +364,24 @@ startBtn.addEventListener("click", async () => {
     raw.textContent = allText.trim();
     statusEl.textContent="Analizuoju tekstą…";
 
-    const linesFromBBoxes = groupWordsIntoLines(allWords);
-    const rows = analyzeLines(linesFromBBoxes,{aggressive});
-    renderRows(rows);
-    renderCoagAlert(rows);
-    statusEl.textContent = rows.length ? `Rasta įrašų: ${rows.length}` : "Nepavyko aptikti lentelės. Pabandykite aiškesnę nuotrauką / PDF arba priartinkite tik lentelę.";
+    let linesFromBBoxes = groupWordsIntoLines(allWords);
+
+// Fallback #1: jei per mažai eilučių iš bbox, bandome „švelnesnį“ grupavimą
+if (!linesFromBBoxes || linesFromBBoxes.length < 5) {
+  linesFromBBoxes = groupWordsIntoLinesLoose(allWords);
+}
+
+// Fallback #2: jei vis dar nieko — krentame į „raw text“ eilutes
+let rows = analyzeLines(linesFromBBoxes,{aggressive});
+if (!rows.length) {
+  const naiveLines = raw.textContent.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  rows = analyzeLines(naiveLines,{aggressive:true}); // agresyvesnis režimas
+}
+
+renderRows(rows);
+renderCoagAlert(rows);
+statusEl.textContent = rows.length ? `Rasta įrašų: ${rows.length}` : "Nepavyko aptikti lentelės. Pabandykite aiškesnę nuotrauką/PDF arba priartinkite tik lentelę.";
+
   }catch(err){
     console.error(err);
     statusEl.textContent="Įvyko klaida apdorojant. Pamėginkite dar kartą.";
