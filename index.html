@@ -410,12 +410,62 @@ startBtn.addEventListener("click", async () => {
       debugBox.open = false;
     }
 
-    // Analizė
-    let rows = analyzeText(lines.join("\n"),{aggressive});
-    // 4) jei analizė vis tiek tuščia – „grubus“ skaičių gaudymas
-    if (!rows.length) {
-      rows = bruteExtract(raw.textContent);
-    }
+   // Analizė (1) – bandome skaityti stulpeliais
+let rows = analyzeByColumns(lines);
+
+// Jei stulpelinis pagavo per mažai, krentame į senąjį parserį
+if (rows.length < 4) {
+  rows = analyzeText(lines.join("\n"), { aggressive });
+  // Galutinis „grubus“ fallback
+  if (!rows.length) {
+    rows = bruteExtract(raw.textContent);
+  }
+}
+<script>
+// --- Nauja: stulpelinė analizė (TEST | RESULT | RANGE | UNITS) ---
+function analyzeByColumns(lines){
+  const rows = [];
+  // pabandom rasti antraštę; jei nerandam — vis tiek skenuosim nuo pradžios
+  let start = lines.findIndex(s => /\bTEST\b/i.test(s) && /\bRESULT\b/i.test(s));
+  if (start < 0) start = 0;
+
+  for (let i = start + 1; i < lines.length; i++){
+    const s = lines[i];
+    if (!s || /^[-\s]*$/.test(s) || /end of report/i.test(s)) continue;
+
+    // dalinam pagal ≥2 tarpus (dažniausia PDF lentelių forma)
+    const parts = s.split(/\s{2,}/).map(t => t.trim()).filter(Boolean);
+    if (parts.length < 2) continue;
+
+    const nameRaw = parts[0];
+    const hit = TEST_MAP.find(m => m.rx.test(nameRaw));
+    if (!hit) continue;
+
+    // RESULT — dažniausiai parts[1]
+    const mVal = (parts[1].match(/-?\d+(?:[.,]\d+)?/) || [])[0];
+    const value = DEC(mVal);
+
+    // RANGE — dažniausiai parts[2]
+    let lo = null, hi = null, range = "";
+    const r = (parts[2] || "").match(/(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/);
+    if (r){ lo = DEC(r[1]); hi = DEC(r[2]); range = `${r[1]}–${r[2]}`; }
+
+    // UNITS — dažniausiai parts[3], bet neretai būna ir parts[2] arba net tame pačiame su RESULT
+    let units = "";
+    const um = (parts[3] || parts[2] || parts[1] || "").match(/(g\/L|g\/dL|g%|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|10\^3\/u?L|10\^9\/u?L|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm|mg\/L|%|s|sec|sek|min|fL|fl|pg)/i);
+    if (um) units = normalizeUnits(um[1]);
+
+    let tag = "Neaišku";
+    if (value!=null && lo!=null && hi!=null) tag = value<lo ? "Žemas" : (value>hi ? "Aukštas" : "Normoje");
+
+    rows.push({
+      name: hit.name, value, units: units||"", range, lo, hi, tag,
+      note: "", typicalFallback: false, source: s
+    });
+  }
+  return rows;
+}
+</script>
 
     renderRows(rows);
     renderCoagAlert(rows);
