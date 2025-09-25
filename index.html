@@ -4,10 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kraujo tyrimų analizė (beta)</title>
-  <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas ir gaukite informacinę suvestinę. Nediagnozuoja.">
+  <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas arba PDF ir gaukite informacinę suvestinę. Nediagnozuoja.">
+  <!-- UI -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <link rel="icon" href="data:,">
+  <!-- OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- PDF -> canvas -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.js"></script>
   <style>
     .dropzone { border: 2px dashed rgba(0,0,0,0.2); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -18,12 +22,8 @@
     <header class="mb-6">
       <h1 class="text-2xl sm:text-3xl font-semibold">Kraujo tyrimų analizė (beta)</h1>
       <p class="text-sm text-gray-600 mt-2">
-        Įkelkite laboratorinių tyrimų <b>nuotraukas ar PDF-paveiksliukus</b> (pvz., kraujo bendras, biochemija).
-        Vykdoma automatinė teksto atpažintis (OCR) ir informacinė analizė.
+        Įkelkite laboratorinių tyrimų <b>nuotraukas arba PDF</b> (pvz., CBC, biochemija). Apdorojimas vyksta tik Jūsų įrenginyje.
       </p>
-      <div class="mt-3 text-xs text-gray-500">
-        <b>Privatumas:</b> apdorojimas vyksta tik Jūsų įrenginyje — duomenys niekur nesiunčiami.
-      </div>
     </header>
 
     <div class="bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm rounded-lg p-3 mb-6">
@@ -34,8 +34,8 @@
     <section class="mb-6">
       <div id="drop" class="dropzone rounded-xl p-6 bg-white text-center cursor-pointer">
         <p class="text-sm text-gray-600">Nutempkite failus čia arba paspauskite, kad pasirinktumėte.</p>
-        <p class="text-xs text-gray-400 mt-1">Leidžiami: JPG, PNG, WEBP, HEIC (jei naršyklė palaiko), PDF-skenai kaip paveikslai.</p>
-        <input id="fileInput" type="file" accept="image/*" multiple class="hidden">
+        <p class="text-xs text-gray-400 mt-1">Leidžiami: JPG, PNG, WEBP, HEIC (jei palaiko), PDF.</p>
+        <input id="fileInput" type="file" accept="image/*,application/pdf" multiple class="hidden">
       </div>
 
       <div class="mt-4 flex items-center gap-3">
@@ -63,8 +63,8 @@
       <div class="border border-red-200 bg-red-50 text-red-900 rounded-xl p-4">
         <h3 class="font-semibold">DĖMESIO: galimi nukrypimai kraujo krešumo tyrimuose</h3>
         <p class="text-sm mt-1">
-          Kraujo tyrimas <b>neatitinka normų</b>. Rekomenduojame <b>pakartoti kraujo tyrimus po kelių dienų</b> ir
-          (jei planuojama operacija) <b>susisiekti dėl galimo operacijos perkėlimo</b>.
+          Kraujo tyrimas <b>neatitinka normų</b>. Rekomenduojame <b>pakartoti tyrimus po kelių dienų</b> ir, jei planuojama operacija,
+          <b>susisiekti dėl galimo operacijos perkėlimo</b>.
         </p>
         <div class="overflow-x-auto bg-white rounded-lg border mt-3">
           <table class="min-w-full text-sm">
@@ -80,7 +80,7 @@
             <tbody id="coagTbody"></tbody>
           </table>
         </div>
-        <p class="text-xs mt-2 opacity-80">Šis pranešimas yra informacinis ir nepakeičia gydytojo sprendimų.</p>
+        <p class="text-xs mt-2 opacity-80">Informacinis perspėjimas – nepakeičia gydytojo sprendimų.</p>
       </div>
     </section>
 
@@ -117,7 +117,7 @@
       </details>
 
       <p class="text-xs text-gray-500 mt-3">
-        Jei laboratorija dokumente nurodo savo ribas, jos laikomos pirminėmis. Kai ribų nėra, taikomos atsargios „tipinės“ ribos su įspėjimu.
+        Pirmumas – laboratorijos dokumente nurodytoms riboms. Jei ribų nėra, taikomos atsargios „tipinės“ ribos su įspėjimu.
       </p>
     </section>
 
@@ -127,17 +127,17 @@
   </div>
 
 <script>
-/* ====== Pagalbinės ====== */
+/* === Pagalbinės === */
 const $ = (id) => document.getElementById(id);
 $("yr").textContent = new Date().getFullYear();
-
 const DEC = (s) => { if (s==null) return null; const x=(""+s).replace(/\s/g,"").replace(",","."); const n=Number(x); return Number.isFinite(n)?n:null; };
 const HL_RX    = /\b([HL])\b/;
 const RANGE_RX = /(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/;
 
-// Išplėstas vienetų žodynas (fl, pg, /µL, /cu.mm ir kt.)
+// Išplėstas vienetų žodynas
 const UNIT_RX = /(g\/L|g\/dL|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|mg\/L|%|s|sec|sek|min|fL|fl|pg|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm)/i;
 
+/* Pastabos (neutralios, ne-diagnostinės) */
 const NOTES = {
   "Hemoglobinas": {low:"Dažna priežastis – geležies stoka ar kraujavimas. Pasitarkite su gydytoju.", high:"Gali būti dehidratacija ar kitos būklės; vertinti kliniką."},
   "Feritinas": {low:"Dažnai rodo geležies trūkumą; vertinti su Hb/MCV/CRP.", high:"Gali kilti uždegimo metu; vertinti su CRP."},
@@ -153,7 +153,7 @@ const NOTES = {
   "D-dimerai": {high:"Padidėję D-dimerai būna įvairiose būklėse; vertinti kliniškai."}
 };
 
-// Sinonimų žemėlapis
+/* Sinonimų žemėlapis */
 const TEST_MAP = [
   {rx:/\b(HGB|Hb|hemoglobi?n(as)?)\b/i, name:"Hemoglobinas"},
   {rx:/\b(HCT|hematokrit(as)?)\b/i, name:"Hematokritas"},
@@ -181,12 +181,11 @@ const TEST_MAP = [
   {rx:/\bD[\s-]?dimer(ai|ų)?\b/i, name:"D-dimerai"},
 ];
 
-// Tipinės (atsargios) ribos
+/* Tipinės (atsargios) ribos – pirmenybė laboratorijos nurodytoms */
 const TYPICAL = {
   "Hemoglobinas":   { units:["g/L","g/dL"], ranges:[{u:"g/L", lo:120, hi:160},{u:"g/dL", lo:12, hi:16}] },
-  "Hematokritas":   { units:["%"],          ranges:[{u:"%", lo:36, hi:46}] },
+  "Hematokritas":   { units:["%"], ranges:[{u:"%", lo:36, hi:46}] },
   "Eritrocitai":    { units:["x10^12/L","10^12/L"], ranges:[{u:"x10^12/L", lo:3.8, hi:5.2},{u:"10^12/L", lo:3.8, hi:5.2}] },
-  // WBC/PLT – papildyti /µL ir /cu.mm
   "Leukocitai":     { units:["x10^9/L","10^9/L","/µL","/uL","/mm3","/cu.mm"], ranges:[
     {u:"x10^9/L", lo:4.0, hi:10.0},{u:"10^9/L", lo:4.0, hi:10.0},
     {u:"/µL", lo:4000, hi:11000},{u:"/uL", lo:4000, hi:11000},
@@ -207,7 +206,6 @@ const TYPICAL = {
   "TSH":            { units:["mIU/L","µIU/mL"], ranges:[{u:"mIU/L", lo:0.4, hi:4.0},{u:"µIU/mL", lo:0.4, hi:4.0}] },
   "FT4":            { units:["pmol/L","ng/dL"], ranges:[{u:"pmol/L", lo:12, hi:22},{u:"ng/dL", lo:0.9, hi:1.7}] },
   "Vit D":          { units:["ng/mL","nmol/L"], ranges:[{u:"ng/mL", lo:20, hi:50},{u:"nmol/L", lo:50, hi:125}] },
-  // Eritrocitų indeksai
   "MCV":            { units:["fL","fl"], ranges:[{u:"fL", lo:80, hi:99},{u:"fl", lo:80, hi:99}] },
   "MCH":            { units:["pg"],      ranges:[{u:"pg", lo:28, hi:32}] },
   "MCHC":           { units:["g/dL"],    ranges:[{u:"g/dL", lo:30, hi:34}] },
@@ -221,19 +219,26 @@ const TYPICAL = {
   ]},
 };
 
-/* ====== Įkėlimas/valdymas ====== */
+/* UI ir failai */
 const drop = $("drop"), input=$("fileInput"), startBtn=$("startBtn"), statusEl=$("status");
 const results = $("results"), tbody=$("tbody"), raw=$("raw"), exportCsv=$("exportCsv"), clearBtn=$("clearBtn");
 const coagWrap = $("coagWrap"), coagTbody = $("coagTbody");
+let files=[];
 
 drop.addEventListener("click", () => input.click());
 drop.addEventListener("dragover", (e)=>{e.preventDefault(); drop.classList.add("bg-gray-100");});
 drop.addEventListener("dragleave", ()=>drop.classList.remove("bg-gray-100"));
-let files=[];
-drop.addEventListener("drop",(e)=>{e.preventDefault(); drop.classList.remove("bg-gray-100"); files=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/")); statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių vaizdų.";});
-input.addEventListener("change",(e)=>{files=[...e.target.files]; statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių vaizdų.";});
+drop.addEventListener("drop",(e)=>{
+  e.preventDefault(); drop.classList.remove("bg-gray-100");
+  files=[...e.dataTransfer.files].filter(f=> f.type.startsWith("image/") || f.type==="application/pdf");
+  statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių failų.";
+});
+input.addEventListener("change",(e)=>{
+  files=[...e.target.files];
+  statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių failų.";
+});
 
-/* ====== VAIZDO PAGERINIMAS PRIEŠ OCR ====== */
+/* Vaizdo pagerinimas prieš OCR (binarizacija) */
 async function fileToEnhancedBlob(file) {
   const img = await new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -242,64 +247,59 @@ async function fileToEnhancedBlob(file) {
     im.onerror = reject;
     im.src = url;
   });
-
   const maxW = 2000;
   const scale = Math.min(1, maxW / img.width);
-  const w = Math.round(img.width * scale);
-  const h = Math.round(img.height * scale);
+  const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
 
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
-  ctx.drawImage(img, 0, 0, w, h);
-
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-
-  // Global threshold ~ adaptive-lite
-  let sum = 0;
-  for (let i=0;i<d.length;i+=4){
-    const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-    sum += gray;
-  }
-  const avg = sum / (d.length/4);
-  const T = Math.max(110, Math.min(170, avg));
-
-  for (let i=0;i<d.length;i+=4){
-    const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-    const v = (gray > T) ? 255 : 0;
-    d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
-  }
-  ctx.putImageData(imgData, 0, 0);
-
+  const imgData = ctx.getImageData(0, 0, w, h), d = imgData.data;
+  let sum=0; for (let i=0;i<d.length;i+=4){ const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; sum+=g; }
+  const avg = sum/(d.length/4), T = Math.max(110, Math.min(170, avg));
+  for (let i=0;i<d.length;i+=4){ const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; const v=(g>T)?255:0; d[i]=d[i+1]=d[i+2]=v; d[i+3]=255; }
+  ctx.putImageData(imgData,0,0);
   const blob = await new Promise(res => c.toBlob(res, "image/png", 1));
-  URL.revokeObjectURL(img.src);
-  return blob;
+  URL.revokeObjectURL(img.src); return blob;
 }
 
-/* ====== Grupavimas į eilutes pagal bounding boxes ====== */
+/* PDF -> paveikslų sąrašas */
+async function pdfToImageBlobs(file, scale = 2.0) {
+  const arrayBuf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
+  const blobs = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d");
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const blob = await new Promise(res => canvas.toBlob(res, "image/png", 1));
+    blobs.push(blob);
+  }
+  return blobs;
+}
+
+/* Iš žodžių (bbox) sudedame eilutes */
 function groupWordsIntoLines(words){
   const good = words.filter(w => w.conf >= 60 && w.text && w.text.trim());
   good.sort((a,b)=> a.y0 - b.y0 || a.x0 - b.x0);
-
-  const lines = [];
-  const TOL = 8;
+  const lines = [], TOL = 8;
   for(const w of good){
     let line = lines.find(L => Math.abs(L.y - w.y0) < TOL);
     if(!line){ line = { y: w.y0, words: [] }; lines.push(line); }
     line.words.push(w);
   }
-  for(const L of lines){
-    L.words.sort((a,b)=> a.x0 - b.x0);
-    L.text = L.words.map(w=>w.text).join(" ");
-  }
+  for(const L of lines){ L.words.sort((a,b)=> a.x0 - b.x0); L.text = L.words.map(w=>w.text).join(" "); }
   return lines.map(L => L.text);
 }
 
-/* ====== OCR + analizė ====== */
+/* Pagrindinis veiksmas */
 startBtn.addEventListener("click", async () => {
-  if (!files.length){ statusEl.textContent="Įkelkite bent vieną nuotrauką."; return; }
-  startBtn.disabled=true; tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden"); results.classList.remove("hidden"); statusEl.textContent="Vyksta OCR…";
+  if (!files.length){ statusEl.textContent="Įkelkite bent vieną failą."; return; }
+  startBtn.disabled=true;
+  tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden");
+  results.classList.remove("hidden"); statusEl.textContent="Vyksta OCR…";
   const useLt=$("langLt").checked, aggressive=$("aggressive").checked;
 
   try{
@@ -311,17 +311,30 @@ startBtn.addEventListener("click", async () => {
       tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK
     });
 
-    let allText = "";
-    let allWords = [];
+    let allText = "", allWords = [];
 
-    for(let i=0;i<files.length;i++){
-      statusEl.textContent=`OCR ${i+1}/${files.length}…`;
-      const enhanced = await fileToEnhancedBlob(files[i]);
-      const { data } = await worker.recognize(enhanced);
-      allText += "\n\n===== FAILAS " + (i+1) + " =====\n" + data.text;
-      allWords = allWords.concat(data.words.map(w => ({
-        text: w.text, x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1, conf:w.conf
-      })));
+    for (let i = 0; i < files.length; i++) {
+      statusEl.textContent = `OCR ${i+1}/${files.length}…`;
+      const f = files[i];
+      let blobs = [];
+      if (f.type === "application/pdf") {
+        const pageBlobs = await pdfToImageBlobs(f, 2.0);
+        for (const b of pageBlobs) {
+          const fakeFile = new File([b], "page.png", { type: "image/png" });
+          blobs.push(await fileToEnhancedBlob(fakeFile));
+        }
+      } else {
+        blobs.push(await fileToEnhancedBlob(f));
+      }
+
+      for (let j = 0; j < blobs.length; j++) {
+        const label = blobs.length > 1 ? ` (psl. ${j+1})` : "";
+        const { data } = await worker.recognize(blobs[j]);
+        allText += `\n\n===== FAILAS ${i+1}${label} =====\n` + data.text;
+        allWords = allWords.concat(data.words.map(w => ({
+          text: w.text, x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1, conf:w.conf
+        })));
+      }
     }
     await worker.terminate();
 
@@ -332,7 +345,7 @@ startBtn.addEventListener("click", async () => {
     const rows = analyzeLines(linesFromBBoxes,{aggressive});
     renderRows(rows);
     renderCoagAlert(rows);
-    statusEl.textContent=`Rasta įrašų: ${rows.length}`;
+    statusEl.textContent = rows.length ? `Rasta įrašų: ${rows.length}` : "Nepavyko aptikti lentelės. Pabandykite aiškesnę nuotrauką / PDF arba priartinkite tik lentelę.";
   }catch(err){
     console.error(err);
     statusEl.textContent="Įvyko klaida apdorojant. Pamėginkite dar kartą.";
@@ -341,15 +354,11 @@ startBtn.addEventListener("click", async () => {
   }
 });
 
-function analyzeLines(lines,{aggressive=false}={}){
-  const text = lines.join("\n");
-  return analyzeText(text,{aggressive});
-}
+function analyzeLines(lines,{aggressive=false}={}){ return analyzeText(lines.join("\n"),{aggressive}); }
 
 function analyzeText(text,{aggressive=false}={}){
   const lines = text.split(/\r?\n/).map(s=>s.replace(/\t+/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
-  const results=[];
-  const windowSize=2;
+  const results=[], windowSize=2;
   for(let i=0;i<lines.length;i++){
     const line=lines[i];
     const hit = TEST_MAP.find(m=>m.rx.test(line));
@@ -358,11 +367,10 @@ function analyzeText(text,{aggressive=false}={}){
 
     let value=null, units=null, flag=null;
     const hl=line.match(HL_RX); if(hl) flag=hl[1].toUpperCase()==="H"?"H":"L";
-    const valueMatch=line.match(/(-?\d+(?:[.,]\d+)?)/); if(valueMatch) value=DEC(valueMatch[1]);
-    const unitMatch=line.match(UNIT_RX); if(unitMatch) units=unitMatch[1];
+    const vm=line.match(/(-?\d+(?:[.,]\d+)?)/); if(vm) value=DEC(vm[1]);
+    const um=line.match(UNIT_RX); if(um) units=um[1];
 
-    let lo=null, hi=null, rangeText=null;
-    let r=line.match(RANGE_RX);
+    let lo=null, hi=null, rangeText=null, r=line.match(RANGE_RX);
     if(!r){
       for(let k=1;k<=windowSize && i+k<lines.length;k++){ r=lines[i+k].match(RANGE_RX); if(r) break; }
       if(!r){ for(let k=1;k<=windowSize && i-k>=0;k++){ r=lines[i-k].match(RANGE_RX); if(r) break; } }
@@ -451,17 +459,19 @@ function escapeHtml(s){
     .replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
 }
 
-/* ====== Eksportas ir valdymas ====== */
+/* Eksportas / valdymas */
 exportCsv.addEventListener("click", ()=>{
   const rows=[...tbody.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.replace(/\s+/g," ").trim()));
   const header=["Tyrimas","Reikšmė","Vienetai","Norma","Žyma","Pastaba","Šaltinis"];
   const data=[header,...rows];
   const csv=data.map(r=>r.map(v=>`"${v.replaceAll('"','""')}"`).join(",")).join("\n");
-  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="tyrimai.csv"; a.click(); URL.revokeObjectURL(a.href);
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="tyrimai.csv"; a.click(); URL.revokeObjectURL(a.href);
 });
-clearBtn.addEventListener("click", ()=>{ tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden"); statusEl.textContent="Išvalyta. Galite įkelti naujus failus."; });
-
-(function handleQuery(){ const url=new URL(location.href); })();
+clearBtn.addEventListener("click", ()=>{
+  tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden");
+  statusEl.textContent="Išvalyta. Galite įkelti naujus failus.";
+});
 </script>
 </body>
 </html>
