@@ -5,11 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kraujo tyrimų analizė (beta)</title>
   <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas ir gaukite informacinę suvestinę. Nediagnozuoja.">
-  <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Tesseract.js (OCR) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <!-- Icons -->
   <link rel="icon" href="data:,">
   <style>
     .dropzone { border: 2px dashed rgba(0,0,0,0.2); }
@@ -22,20 +19,16 @@
       <h1 class="text-2xl sm:text-3xl font-semibold">Kraujo tyrimų analizė (beta)</h1>
       <p class="text-sm text-gray-600 mt-2">
         Įkelkite laboratorinių tyrimų <b>nuotraukas ar PDF-paveiksliukus</b> (pvz., kraujo bendras, biochemija).
-        Vykdoma automatinė teksto atpažintis (OCR) ir informacinė analizė.
       </p>
       <div class="mt-3 text-xs text-gray-500">
         <b>Privatumas:</b> apdorojimas vyksta tik Jūsų įrenginyje — duomenys niekur nesiunčiami.
       </div>
     </header>
 
-    <!-- Disclaimer -->
     <div class="bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm rounded-lg p-3 mb-6">
-      <b>Svarbu:</b> tai <u>ne</u> medicininė diagnozė ir <u>ne</u> gydymo rekomendacija. Rodoma tik informacinė suvestinė.
-      Dėl interpretacijos ir sprendimų <b>kreipkitės į gydytoją</b>, nes normos gali skirtis pagal laboratoriją, amžių, lytį, nėštumą ir kt.
+      <b>Svarbu:</b> tai <u>ne</u> medicininė diagnozė ir <u>ne</u> gydymo rekomendacija. Dėl rezultatų interpretacijos <b>kreipkitės į gydytoją</b>.
     </div>
 
-    <!-- Upload -->
     <section class="mb-6">
       <div id="drop" class="dropzone rounded-xl p-6 bg-white text-center cursor-pointer">
         <p class="text-sm text-gray-600">Nutempkite failus čia arba paspauskite, kad pasirinktumėte.</p>
@@ -48,7 +41,6 @@
         <span id="status" class="text-sm text-gray-600"></span>
       </div>
 
-      <!-- Options -->
       <details class="mt-4">
         <summary class="text-sm font-medium cursor-pointer">Išplėstiniai nustatymai</summary>
         <div class="mt-3 space-y-2 text-sm">
@@ -58,13 +50,39 @@
           </label>
           <label class="flex items-center gap-2">
             <input id="aggressive" type="checkbox">
-            <span>Agresyvesnis lentelių/diag. išgavimas (gali duoti daugiau klaidingų pozityvų)</span>
+            <span>Agresyvesnis lentelių/diag. išgavimas</span>
           </label>
         </div>
       </details>
     </section>
 
-    <!-- Results -->
+    <!-- KREŠUMO ĮSPĖJIMAS -->
+    <section id="coagWrap" class="hidden mb-6">
+      <div class="border border-red-200 bg-red-50 text-red-900 rounded-xl p-4">
+        <h3 class="font-semibold">DĖMESIO: galimi nukrypimai kraujo krešumo tyrimuose</h3>
+        <p class="text-sm mt-1">
+          Kraujo tyrimas <b>neatitinka normų</b>. Rekomenduojame <b>pakartoti kraujo tyrimus po kelių dienų</b> ir
+          (jei planuojama operacija) <b>susisiekti dėl galimo operacijos perkėlimo</b>.
+        </p>
+        <div class="overflow-x-auto bg-white rounded-lg border mt-3">
+          <table class="min-w-full text-sm">
+            <thead class="bg-red-100">
+              <tr>
+                <th class="text-left px-3 py-2">Tyrimas</th>
+                <th class="text-left px-3 py-2">Reikšmė</th>
+                <th class="text-left px-3 py-2">Vienetai</th>
+                <th class="text-left px-3 py-2">Norma</th>
+                <th class="text-left px-3 py-2">Žyma</th>
+              </tr>
+            </thead>
+            <tbody id="coagTbody"></tbody>
+          </table>
+        </div>
+        <p class="text-xs mt-2 opacity-80">Šis pranešimas yra informacinis ir nepakeičia gydytojo sprendimų.</p>
+      </div>
+    </section>
+
+    <!-- SUVESTINĖ -->
     <section id="results" class="hidden">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-xl font-semibold">Suvestinė</h2>
@@ -97,8 +115,7 @@
       </details>
 
       <p class="text-xs text-gray-500 mt-3">
-        Pastaba: jei laboratorija dokumente nurodo savo ribas, jos laikomos pirminėmis. Kai ribų nėra,
-        taikomos saugios „tipinės“ ribos su įspėjimu.
+        Jei laboratorija dokumente nurodo savo ribas, jos laikomos pirminėmis. Kai ribų nėra, taikomos atsargios „tipinės“ ribos su įspėjimu.
       </p>
     </section>
 
@@ -108,51 +125,29 @@
   </div>
 
 <script>
-/* ========== Pagalbinės funkcijos ========== */
 const $ = (id) => document.getElementById(id);
 $("yr").textContent = new Date().getFullYear();
+const DEC = (s) => { if (s==null) return null; const x=(""+s).replace(/\s/g,"").replace(",","."); const n=Number(x); return Number.isFinite(n)?n:null; };
+const HL_RX = /\b([HL])\b/;
+const RANGE_RX = /(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/;
+const UNIT_RX = /(g\/L|g\/dL|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|mg\/L|%|s|sec|sek|min)/i;
 
-const DEC = (s) => {
-  if (s == null) return null;
-  // pakeisti kablelį į tašką, pašalinti tarpų
-  const x = (""+s).replace(/\s/g, "").replace(",", ".");
-  const n = Number(x);
-  return Number.isFinite(n) ? n : null;
-};
-
-const percentDiff = (val, lo, hi) => {
-  if (val==null || lo==null || hi==null) return null;
-  if (val < lo) return -Math.round((100*(lo - val))/((lo+hi)/2));
-  if (val > hi) return  Math.round((100*(val - hi))/((lo+hi)/2));
-  return 0;
-};
-
-// mažas paaiškinimų rinkinys (trumpi, neutralūs, ne-diagnostiniai)
 const NOTES = {
-  "Hemoglobinas": {
-    low: "Dažna priežastis – geležies stoka ar kraujavimas. Įvertinti simptomus, pasitarti su gydytoju.",
-    high:"Gali būti dehidratacija ar kitos būklės; vertinti kliniką su gydytoju."
-  },
-  "Feritinas": {
-    low: "Dažnai rodo geležies trūkumą, bet vertinti kartu su Hb, MCV, CRP.",
-    high:"Gali kilti uždegimo metu; vertinti kartu su CRP ir klinika."
-  },
-  "CRP": {
-    high:"Padidėjimas dažniausiai siejamas su uždegimu; vertinti kliniką ir kitus tyrimus."
-  },
-  "TSH": {
-    low: "Gali rodyti skydliaukės hiperfunkciją; vertinti su FT4/FT3.",
-    high:"Gali rodyti hipotirozę; vertinti su FT4/FT3."
-  },
-  "Gliukozė": {
-    high:"Padidėjimas gali rodyti angliavandenių apykaitos sutrikimus; vertinti pakartotinai/gydytojo."
-  },
-  "Vit D": {
-    low: "Dažnas trūkumas; korekcija aptariama su gydytoju."
-  },
+  "Hemoglobinas": {low:"Dažna priežastis – geležies stoka ar kraujavimas. Pasitarkite su gydytoju.", high:"Gali būti dehidratacija ar kitos būklės; vertinti kliniką."},
+  "Feritinas": {low:"Dažnai rodo geležies trūkumą; vertinti su Hb/MCV/CRP.", high:"Gali kilti uždegimo metu; vertinti su CRP."},
+  "CRP": {high:"Padidėjimas dažniausiai siejamas su uždegimu."},
+  "TSH": {low:"Galima hiperfunkcija; vertinti su FT4/FT3.", high:"Galima hipotirozė; vertinti su FT4/FT3."},
+  "Gliukozė": {high:"Gali rodyti angliavandenių apykaitos sutrikimus; vertinti pakartotinai."},
+  "Vit D": {low:"Dažnas trūkumas; korekciją aptaria gydytojas."},
+  // Krešumas – neutrali pastaba
+  "INR": {high:"Padidėjęs INR reiškia ilgesnį krešėjimo laiką.", low:"Mažas INR – trumpesnis krešėjimo laikas."},
+  "Protrombino laikas (PT)": {high:"Prailgėjęs PT – lėtesnis krešėjimas.", low:"Sutrumpėjęs PT – greitesnis krešėjimas."},
+  "aPTT": {high:"Prailgėjęs aPTT – lėtesnis krešėjimas.", low:"Sutrumpėjęs aPTT – greitesnis krešėjimas."},
+  "Fibrinogenas": {low:"Žemas fibrinogenas gali mažinti krešumą.", high:"Didelis fibrinogenas dažnai susijęs su uždegimu."},
+  "D-dimerai": {high:"Padidėję D-dimerai būna įvairiose būklėse; vertinti kliniškai."}
 };
 
-// sinonimų/regex žemėlapis → kanoninis pavadinimas
+// sinonimai
 const TEST_MAP = [
   {rx:/\b(HGB|Hb|hemoglobi?n(as)?)\b/i, name:"Hemoglobinas"},
   {rx:/\b(HCT|hematokrit(as)?)\b/i, name:"Hematokritas"},
@@ -172,10 +167,15 @@ const TEST_MAP = [
   {rx:/\bTSH\b/i, name:"TSH"},
   {rx:/\bFT4\b/i, name:"FT4"},
   {rx:/\bVit(\.?|aminas\s*)D\b/i, name:"Vit D"},
+  // --- Krešumo testai ---
+  {rx:/\bINR\b/i, name:"INR"},
+  {rx:/\b(PT|protrombin(o|o)?\s*laik(as)?|Quick)\b/i, name:"Protrombino laikas (PT)"},
+  {rx:/\bA?PTT\b|\baktyvuotas?\s+dalinis\s+tromboplastino\s+laikas\b/i, name:"aPTT"},
+  {rx:/\bfibrinogen(as)?\b/i, name:"Fibrinogenas"},
+  {rx:/\bD[\s-]?dimer(ai|ų)?\b/i, name:"D-dimerai"},
 ];
 
-// tipinės (atsargios) normos kaip atsarginis variantas, kai laboratorija nepateikia ribų.
-// ⚠️ Tik edukaciniam naudojimui. Realioje situacijoje pirmumas – laboratorijos riboms.
+// tipinės ribos (atsargios; pirmenybė laboratorijos nurodytoms)
 const TYPICAL = {
   "Hemoglobinas":   { units:["g/L","g/dL"], ranges: [{u:"g/L", lo:120, hi:160},{u:"g/dL", lo:12, hi:16}] },
   "Hematokritas":   { units:["%"],          ranges: [{u:"%",   lo:36,  hi:46 }] },
@@ -192,208 +192,114 @@ const TYPICAL = {
   "TSH":            { units:["mIU/L","µIU/mL"],ranges:[{u:"mIU/L", lo:0.4, hi:4.0},{u:"µIU/mL", lo:0.4, hi:4.0}] },
   "FT4":            { units:["pmol/L","ng/dL"], ranges:[{u:"pmol/L", lo:12, hi:22},{u:"ng/dL", lo:0.9, hi:1.7}] },
   "Vit D":          { units:["ng/mL","nmol/L"], ranges:[{u:"ng/mL", lo:20, hi:50},{u:"nmol/L", lo:50, hi:125}] },
+  // --- Krešumas (tipinės) ---
+  "INR":            { units:["","vnt"], ranges:[{u:"", lo:0.8, hi:1.2},{u:"vnt", lo:0.8, hi:1.2}] },
+  "Protrombino laikas (PT)": { units:["s","sek","sec"], ranges:[{u:"s", lo:11, hi:15},{u:"sek", lo:11, hi:15},{u:"sec", lo:11, hi:15}] },
+  "aPTT":           { units:["s","sek","sec"], ranges:[{u:"s", lo:25, hi:35},{u:"sek", lo:25, hi:35},{u:"sec", lo:25, hi:35}] },
+  "Fibrinogenas":   { units:["g/L"], ranges:[{u:"g/L", lo:2.0, hi:4.0}] },
+  "D-dimerai":      { units:["mg/L","mg/L FEU","µg/mL","µg/mL FEU"], ranges:[{u:"mg/L", lo:0, hi:0.5},{u:"mg/L FEU", lo:0, hi:0.5},{u:"µg/mL", lo:0, hi:0.5},{u:"µg/mL FEU", lo:0, hi:0.5}] },
 };
 
-// bandome iš eilutės pagauti vienetus (paprastas heuristinis rinkinys)
-const UNIT_RX = /(g\/L|g\/dL|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|mg\/L|%)/i;
-
-// rėžių paieška "3.5–5.0" ar "3,5 - 5,0" ir t.t.
-const RANGE_RX = /(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/;
-
-// H/L žymos (kai laboratorija pridėjusi raidę)
-const HL_RX = /\b([HL])\b/;
-
-/* ========== OCR ir parsinimas ========== */
-let files = [];
-
-const drop = $("drop");
-const input = $("fileInput");
-const startBtn = $("startBtn");
-const statusEl = $("status");
-const results = $("results");
-const tbody = $("tbody");
-const raw = $("raw");
-const exportCsv = $("exportCsv");
-const clearBtn = $("clearBtn");
+const drop = $("drop"), input=$("fileInput"), startBtn=$("startBtn"), statusEl=$("status");
+const results = $("results"), tbody=$("tbody"), raw=$("raw"), exportCsv=$("exportCsv"), clearBtn=$("clearBtn");
+const coagWrap = $("coagWrap"), coagTbody = $("coagTbody");
 
 drop.addEventListener("click", () => input.click());
-drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("bg-gray-100"); });
-drop.addEventListener("dragleave", () => drop.classList.remove("bg-gray-100"));
-drop.addEventListener("drop", (e) => {
-  e.preventDefault();
-  drop.classList.remove("bg-gray-100");
-  files = [...e.dataTransfer.files].filter(f => f.type.startsWith("image/"));
-  if (files.length === 0) { statusEl.textContent = "Nepasirinkta jokių vaizdų."; return; }
-  statusEl.textContent = `Pasirinkta ${files.length} failas(-ai).`;
-});
-input.addEventListener("change", (e) => {
-  files = [...e.target.files];
-  if (files.length === 0) { statusEl.textContent = "Nepasirinkta jokių vaizdų."; return; }
-  statusEl.textContent = `Pasirinkta ${files.length} failas(-ai).`;
-});
+drop.addEventListener("dragover", (e)=>{e.preventDefault(); drop.classList.add("bg-gray-100");});
+drop.addEventListener("dragleave", ()=>drop.classList.remove("bg-gray-100"));
+let files=[];
+drop.addEventListener("drop",(e)=>{e.preventDefault(); drop.classList.remove("bg-gray-100"); files=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/")); statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių vaizdų.";});
+input.addEventListener("change",(e)=>{files=[...e.target.files]; statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių vaizdų.";});
 
 startBtn.addEventListener("click", async () => {
-  if (!files.length) { statusEl.textContent = "Įkelkite bent vieną nuotrauką."; return; }
-  startBtn.disabled = true;
-  tbody.innerHTML = "";
-  raw.textContent = "";
-  results.classList.remove("hidden");
-  statusEl.textContent = "Vyksta OCR…";
-
-  const useLt = $("langLt").checked;
-  const aggressive = $("aggressive").checked;
-
-  try {
-    const worker = await Tesseract.createWorker(useLt ? "lit+eng" : "eng", 1, {
-      // Naudojame CDN numatytuosius worker/lang; jei LT nepavyktų – biblioteka kris į ENG
-    });
-
-    let allText = "";
-    for (let i = 0; i < files.length; i++) {
-      statusEl.textContent = `OCR ${i+1}/${files.length}…`;
+  if (!files.length){ statusEl.textContent="Įkelkite bent vieną nuotrauką."; return; }
+  startBtn.disabled=true; tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden"); results.classList.remove("hidden"); statusEl.textContent="Vyksta OCR…";
+  const useLt=$("langLt").checked, aggressive=$("aggressive").checked;
+  try{
+    const worker = await Tesseract.createWorker(useLt ? "lit+eng" : "eng", 1, {});
+    let allText="";
+    for(let i=0;i<files.length;i++){
+      statusEl.textContent=`OCR ${i+1}/${files.length}…`;
       const img = await files[i].arrayBuffer();
-      const { data: { text } } = await worker.recognize(new Blob([img]));
+      const { data:{ text }} = await worker.recognize(new Blob([img]));
       allText += "\n\n===== FAILAS " + (i+1) + " =====\n" + text;
     }
     await worker.terminate();
-
     raw.textContent = allText.trim();
-    statusEl.textContent = "Analizuoju tekstą…";
-
-    const rows = analyzeText(allText, { aggressive });
+    statusEl.textContent="Analizuoju tekstą…";
+    const rows = analyzeText(allText,{aggressive});
     renderRows(rows);
-    statusEl.textContent = `Rasta įrašų: ${rows.length}`;
-  } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Įvyko klaida apdorojant. Pamėginkite dar kartą.";
-  } finally {
-    startBtn.disabled = false;
-  }
+    renderCoagAlert(rows); // <<< nauja
+    statusEl.textContent=`Rasta įrašų: ${rows.length}`;
+  }catch(err){ console.error(err); statusEl.textContent="Įvyko klaida apdorojant. Pamėginkite dar kartą."; }
+  finally{ startBtn.disabled=false; }
 });
 
-function analyzeText(text, { aggressive=false } = {}) {
-  // normalize: vienodiname kablelius/taškus, diakritika paliekama, bet tvarkome tarpus
-  const lines = text.split(/\r?\n/).map(s => s.replace(/\t+/g, ' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
+function analyzeText(text,{aggressive=false}={}){
+  const lines = text.split(/\r?\n/).map(s=>s.replace(/\t+/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
+  const results=[];
+  const windowSize=2;
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    const hit = TEST_MAP.find(m=>m.rx.test(line));
+    if(!hit){ if(!aggressive) continue; if(!/[A-Za-zĄČĘĖĮŠŲŪąčęėįšųū]/.test(line)) continue; }
+    const name = hit ? hit.name : (line.split(/[:\-]/)[0]||"Neatpažintas").trim();
 
-  const results = [];
-  const windowSize = 2; // ieškosime ribų artimiausiose eilutėse
+    let value=null, units=null, flag=null;
+    const hl=line.match(HL_RX); if(hl) flag=hl[1].toUpperCase()==="H"?"H":"L";
+    const valueMatch=line.match(/(-?\d+(?:[.,]\d+)?)/); if(valueMatch) value=DEC(valueMatch[1]);
+    const unitMatch=line.match(UNIT_RX); if(unitMatch) units=unitMatch[1];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // bandome priskirti testą pagal sinonimus
-    const hit = TEST_MAP.find(m => m.rx.test(line));
-    if (!hit) {
-      if (!aggressive) continue;
-      // agresyvus režimas: pagauti eilutes su " – " ir skaičiumi
-      if (!/[A-Za-zĄČĘĖĮŠŲŪąčęėįšųū]/.test(line)) continue; // turi būti bent viena raidė
-    }
-
-    const name = hit ? hit.name : (line.split(/[:\-]/)[0] || "Neatpažintas").trim();
-
-    // reikšmės, vienetai, H/L
-    let value = null, units = null, flag = null;
-    const hl = line.match(HL_RX);
-    if (hl) flag = hl[1].toUpperCase()==="H" ? "H" : "L";
-
-    // susirandame pirmą skaičių kaip reikšmę
-    const valueMatch = line.match(/(-?\d+(?:[.,]\d+)?)/);
-    if (valueMatch) value = DEC(valueMatch[1]);
-
-    const unitMatch = line.match(UNIT_RX);
-    if (unitMatch) units = unitMatch[1];
-
-    // ribos: pačioje eilutėje arba aplinkinėse
     let lo=null, hi=null, rangeText=null;
-    let r = line.match(RANGE_RX);
-    if (!r) {
-      // paieška aplink
-      for (let k = 1; k <= windowSize && i+k < lines.length; k++) {
-        r = lines[i+k].match(RANGE_RX);
-        if (r) break;
-      }
-      if (!r) {
-        for (let k = 1; k <= windowSize && i-k >=0; k++) {
-          r = lines[i-k].match(RANGE_RX);
-          if (r) break;
-        }
-      }
+    let r=line.match(RANGE_RX);
+    if(!r){
+      for(let k=1;k<=windowSize && i+k<lines.length;k++){ r=lines[i+k].match(RANGE_RX); if(r) break; }
+      if(!r){ for(let k=1;k<=windowSize && i-k>=0;k++){ r=lines[i-k].match(RANGE_RX); if(r) break; } }
     }
-    if (r) {
-      lo = DEC(r[1]); hi = DEC(r[2]);
-      rangeText = `${r[1]}–${r[2]}`;
-    }
+    if(r){ lo=DEC(r[1]); hi=DEC(r[2]); rangeText=`${r[1]}–${r[2]}`; }
 
-    // jei nėra laboratorijos ribų – bandome tipines
-    let usedTypical = false;
-    if ((lo==null || hi==null) && name in TYPICAL) {
-      const t = TYPICAL[name];
-      if (units && t.units.some(u => u.toLowerCase()===units.toLowerCase())) {
-        const rr = t.ranges.find(x => x.u.toLowerCase()===units.toLowerCase());
-        if (rr) { lo = rr.lo; hi = rr.hi; usedTypical = true; rangeText = `${rr.lo}–${rr.hi}`; }
-      } else if (!units && t.ranges.length) {
-        // nenurodyti vienetai – pasiimame pirmą kaip heuristiką
-        lo = t.ranges[0].lo; hi = t.ranges[0].hi; units = t.ranges[0].u; usedTypical = true; rangeText = `${lo}–${hi}`;
+    let usedTypical=false;
+    if((lo==null || hi==null) && name in TYPICAL){
+      const t=TYPICAL[name];
+      if(units && t.units.some(u=>u.toLowerCase()===units.toLowerCase())){
+        const rr=t.ranges.find(x=>x.u.toLowerCase()===units.toLowerCase());
+        if(rr){ lo=rr.lo; hi=rr.hi; usedTypical=true; rangeText=`${rr.lo}–${rr.hi}`; }
+      } else if(!units && t.ranges.length){
+        lo=t.ranges[0].lo; hi=t.ranges[0].hi; units=t.ranges[0].u; usedTypical=true; rangeText=`${lo}–${hi}`;
       }
     }
 
-    // interpretacija
-    let tag = "";
-    if (value!=null && lo!=null && hi!=null) {
-      if (value < lo) tag = "Žemas";
-      else if (value > hi) tag = "Aukštas";
-      else tag = "Normoje";
-    } else if (flag) {
-      tag = flag==="H" ? "Aukštas" : "Žemas";
-    } else {
-      tag = "Neaišku";
-    }
+    let tag="";
+    if(value!=null && lo!=null && hi!=null){ tag = value<lo ? "Žemas" : (value>hi ? "Aukštas" : "Normoje"); }
+    else if(flag){ tag = flag==="H" ? "Aukštas" : "Žemas"; }
+    else { tag="Neaišku"; }
 
-    // trumpa pastaba
-    let note = "";
-    if (name in NOTES) {
-      if (tag==="Aukštas" && NOTES[name].high) note = NOTES[name].high;
-      if (tag==="Žemas"  && NOTES[name].low)  note = NOTES[name].low;
-    }
+    let note=""; if(name in NOTES){ if(tag==="Aukštas" && NOTES[name].high) note=NOTES[name].high; if(tag==="Žemas" && NOTES[name].low) note=NOTES[name].low; }
+    if(!value && !aggressive) continue;
 
-    // jei neradome reikšmės ar testas labai neaiškus – praleidžiam nebent agresyvus
-    if (!value && !aggressive) continue;
-
-    results.push({
-      name, value, units: units || "", range: rangeText || "", lo, hi,
-      tag, note,
-      typicalFallback: usedTypical,
-      source: line
-    });
+    results.push({name, value, units:units||"", range:rangeText||"", lo, hi, tag, note, typicalFallback:usedTypical, source:line});
   }
 
-  // sujungti dublius (tą patį tyrimą gali rasti keliose eilutėse)
-  const merged = new Map();
-  for (const r of results) {
-    const key = r.name + "|" + (r.units||"");
-    if (!merged.has(key)) merged.set(key, r);
-    else {
-      const prev = merged.get(key);
-      // imame tą, kuri turi laboratorijos ribas (prioritetas)
-      const score = (x) => (x.lo!=null && x.hi!=null ? 2 : 0) + (x.value!=null ? 1 : 0);
-      merged.set(key, score(r) >= score(prev) ? r : prev);
+  // sujungiam dublikatus
+  const merged=new Map();
+  for(const r of results){
+    const key=r.name+"|"+(r.units||"");
+    if(!merged.has(key)) merged.set(key,r);
+    else{
+      const score=x=> (x.lo!=null && x.hi!=null ? 2:0) + (x.value!=null?1:0);
+      merged.set(key, score(r)>=score(merged.get(key)) ? r : merged.get(key));
     }
   }
-
   return [...merged.values()];
 }
 
-function renderRows(rows) {
-  tbody.innerHTML = "";
-  for (const r of rows) {
-    const color =
-      r.tag === "Aukštas" ? "bg-red-50 text-red-700" :
-      r.tag === "Žemas"   ? "bg-yellow-50 text-yellow-700" :
-      r.tag === "Normoje" ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-700";
-
+function renderRows(rows){
+  tbody.innerHTML="";
+  for(const r of rows){
+    const color = r.tag==="Aukštas"?"bg-red-50 text-red-700" : r.tag==="Žemas"?"bg-yellow-50 text-yellow-700" : r.tag==="Normoje"?"bg-green-50 text-green-700":"bg-gray-50 text-gray-700";
     const tip = r.typicalFallback ? ' <span class="text-xs text-gray-500">(tipinės ribos)</span>' : '';
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
       <td class="px-3 py-2">${escapeHtml(r.name)}</td>
       <td class="px-3 py-2">${r.value!=null ? r.value : ""}</td>
       <td class="px-3 py-2">${escapeHtml(r.units||"")}</td>
@@ -406,42 +312,41 @@ function renderRows(rows) {
   }
 }
 
-function escapeHtml(s) {
-  return (s==null?"":String(s))
-    .replaceAll("&","&amp;").replaceAll("<","&lt;")
-    .replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+function isCoagTest(name){
+  return ["INR","Protrombino laikas (PT)","aPTT","Fibrinogenas","D-dimerai"].includes(name);
 }
 
-/* ========== Eksportas ir valdymas ========== */
-exportCsv.addEventListener("click", () => {
-  const rows = [...tbody.querySelectorAll("tr")].map(tr => [...tr.children].map(td => td.textContent.replace(/\s+/g," ").trim()));
-  const header = ["Tyrimas","Reikšmė","Vienetai","Norma","Žyma","Pastaba","Šaltinis"];
-  const data = [header, ...rows];
-  const csv = data.map(r => r.map(v => `"${v.replaceAll('"','""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "tyrimai.csv";
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
+// Parodo krešumo perspėjimą, jei yra bent vienas nenormalus
+function renderCoagAlert(rows){
+  const bad = rows.filter(r => isCoagTest(r.name) && (r.tag==="Aukštas" || r.tag==="Žemas"));
+  if(!bad.length){ coagWrap.classList.add("hidden"); return; }
+  coagTbody.innerHTML="";
+  for(const r of bad){
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td class="px-3 py-2">${escapeHtml(r.name)}</td>
+      <td class="px-3 py-2">${r.value!=null ? r.value : ""}</td>
+      <td class="px-3 py-2">${escapeHtml(r.units||"")}</td>
+      <td class="px-3 py-2">${escapeHtml(r.range||"")}</td>
+      <td class="px-3 py-2">${escapeHtml(r.tag)}</td>
+    `;
+    coagTbody.appendChild(tr);
+  }
+  coagWrap.classList.remove("hidden");
+}
 
-clearBtn.addEventListener("click", () => {
-  tbody.innerHTML = "";
-  raw.textContent = "";
-  statusEl.textContent = "Išvalyta. Galite įkelti naujus failus.";
-});
+function escapeHtml(s){ return (s==null?"":String(s)).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
 
-/* ========== QR atidarymui pritaikymai ==========
-   Galite į QR įdėti parametrus, pvz.: ?mode=simple
-   Čia galite sureaguoti pagal poreikį.
-*/
-(function handleQuery() {
-  const url = new URL(location.href);
-  // pvz., jei norėtumėt išjungti agresyvų režimą pagal QR paramą:
-  // const mode = url.searchParams.get("mode");
-  // if (mode === "simple") $("aggressive").checked = false;
-})();
+exportCsv.addEventListener("click", ()=>{
+  const rows=[...tbody.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.replace(/\s+/g," ").trim()));
+  const header=["Tyrimas","Reikšmė","Vienetai","Norma","Žyma","Pastaba","Šaltinis"];
+  const data=[header,...rows];
+  const csv=data.map(r=>r.map(v=>`"${v.replaceAll('"','""')}"`).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="tyrimai.csv"; a.click(); URL.revokeObjectURL(a.href);
+});
+clearBtn.addEventListener("click", ()=>{ tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden"); statusEl.textContent="Išvalyta. Galite įkelti naujus failus."; });
+
+(function handleQuery(){ const url=new URL(location.href); })();
 </script>
 </body>
 </html>
