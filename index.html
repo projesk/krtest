@@ -19,6 +19,7 @@
       <h1 class="text-2xl sm:text-3xl font-semibold">Kraujo tyrimų analizė (beta)</h1>
       <p class="text-sm text-gray-600 mt-2">
         Įkelkite laboratorinių tyrimų <b>nuotraukas ar PDF-paveiksliukus</b> (pvz., kraujo bendras, biochemija).
+        Vykdoma automatinė teksto atpažintis (OCR) ir informacinė analizė.
       </p>
       <div class="mt-3 text-xs text-gray-500">
         <b>Privatumas:</b> apdorojimas vyksta tik Jūsų įrenginyje — duomenys niekur nesiunčiami.
@@ -29,6 +30,7 @@
       <b>Svarbu:</b> tai <u>ne</u> medicininė diagnozė ir <u>ne</u> gydymo rekomendacija. Dėl rezultatų interpretacijos <b>kreipkitės į gydytoją</b>.
     </div>
 
+    <!-- Įkėlimas -->
     <section class="mb-6">
       <div id="drop" class="dropzone rounded-xl p-6 bg-white text-center cursor-pointer">
         <p class="text-sm text-gray-600">Nutempkite failus čia arba paspauskite, kad pasirinktumėte.</p>
@@ -56,7 +58,7 @@
       </details>
     </section>
 
-    <!-- KREŠUMO ĮSPĖJIMAS -->
+    <!-- Krešumo įspėjimas -->
     <section id="coagWrap" class="hidden mb-6">
       <div class="border border-red-200 bg-red-50 text-red-900 rounded-xl p-4">
         <h3 class="font-semibold">DĖMESIO: galimi nukrypimai kraujo krešumo tyrimuose</h3>
@@ -82,7 +84,7 @@
       </div>
     </section>
 
-    <!-- SUVESTINĖ -->
+    <!-- Suvestinė -->
     <section id="results" class="hidden">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-xl font-semibold">Suvestinė</h2>
@@ -125,12 +127,16 @@
   </div>
 
 <script>
+/* ====== Pagalbinės ====== */
 const $ = (id) => document.getElementById(id);
 $("yr").textContent = new Date().getFullYear();
+
 const DEC = (s) => { if (s==null) return null; const x=(""+s).replace(/\s/g,"").replace(",","."); const n=Number(x); return Number.isFinite(n)?n:null; };
-const HL_RX = /\b([HL])\b/;
+const HL_RX    = /\b([HL])\b/;
 const RANGE_RX = /(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/;
-const UNIT_RX = /(g\/L|g\/dL|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|mg\/L|%|s|sec|sek|min)/i;
+
+// Išplėstas vienetų žodynas (fl, pg, /µL, /cu.mm ir kt.)
+const UNIT_RX = /(g\/L|g\/dL|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|mg\/L|%|s|sec|sek|min|fL|fl|pg|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm)/i;
 
 const NOTES = {
   "Hemoglobinas": {low:"Dažna priežastis – geležies stoka ar kraujavimas. Pasitarkite su gydytoju.", high:"Gali būti dehidratacija ar kitos būklės; vertinti kliniką."},
@@ -139,15 +145,15 @@ const NOTES = {
   "TSH": {low:"Galima hiperfunkcija; vertinti su FT4/FT3.", high:"Galima hipotirozė; vertinti su FT4/FT3."},
   "Gliukozė": {high:"Gali rodyti angliavandenių apykaitos sutrikimus; vertinti pakartotinai."},
   "Vit D": {low:"Dažnas trūkumas; korekciją aptaria gydytojas."},
-  // Krešumas – neutrali pastaba
-  "INR": {high:"Padidėjęs INR reiškia ilgesnį krešėjimo laiką.", low:"Mažas INR – trumpesnis krešėjimo laikas."},
+  // Krešumas
+  "INR": {high:"Padidėjęs INR – ilgesnis krešėjimo laikas.", low:"Mažas INR – trumpesnis krešėjimo laikas."},
   "Protrombino laikas (PT)": {high:"Prailgėjęs PT – lėtesnis krešėjimas.", low:"Sutrumpėjęs PT – greitesnis krešėjimas."},
   "aPTT": {high:"Prailgėjęs aPTT – lėtesnis krešėjimas.", low:"Sutrumpėjęs aPTT – greitesnis krešėjimas."},
   "Fibrinogenas": {low:"Žemas fibrinogenas gali mažinti krešumą.", high:"Didelis fibrinogenas dažnai susijęs su uždegimu."},
   "D-dimerai": {high:"Padidėję D-dimerai būna įvairiose būklėse; vertinti kliniškai."}
 };
 
-// sinonimai
+// Sinonimų žemėlapis
 const TEST_MAP = [
   {rx:/\b(HGB|Hb|hemoglobi?n(as)?)\b/i, name:"Hemoglobinas"},
   {rx:/\b(HCT|hematokrit(as)?)\b/i, name:"Hematokritas"},
@@ -167,39 +173,55 @@ const TEST_MAP = [
   {rx:/\bTSH\b/i, name:"TSH"},
   {rx:/\bFT4\b/i, name:"FT4"},
   {rx:/\bVit(\.?|aminas\s*)D\b/i, name:"Vit D"},
-  // --- Krešumo testai ---
+  // Krešumas
   {rx:/\bINR\b/i, name:"INR"},
-  {rx:/\b(PT|protrombin(o|o)?\s*laik(as)?|Quick)\b/i, name:"Protrombino laikas (PT)"},
+  {rx:/\b(PT|protrombin(o)?\s*laik(as)?|Quick)\b/i, name:"Protrombino laikas (PT)"},
   {rx:/\bA?PTT\b|\baktyvuotas?\s+dalinis\s+tromboplastino\s+laikas\b/i, name:"aPTT"},
   {rx:/\bfibrinogen(as)?\b/i, name:"Fibrinogenas"},
   {rx:/\bD[\s-]?dimer(ai|ų)?\b/i, name:"D-dimerai"},
 ];
 
-// tipinės ribos (atsargios; pirmenybė laboratorijos nurodytoms)
+// Tipinės (atsargios) ribos
 const TYPICAL = {
-  "Hemoglobinas":   { units:["g/L","g/dL"], ranges: [{u:"g/L", lo:120, hi:160},{u:"g/dL", lo:12, hi:16}] },
-  "Hematokritas":   { units:["%"],          ranges: [{u:"%",   lo:36,  hi:46 }] },
+  "Hemoglobinas":   { units:["g/L","g/dL"], ranges:[{u:"g/L", lo:120, hi:160},{u:"g/dL", lo:12, hi:16}] },
+  "Hematokritas":   { units:["%"],          ranges:[{u:"%", lo:36, hi:46}] },
   "Eritrocitai":    { units:["x10^12/L","10^12/L"], ranges:[{u:"x10^12/L", lo:3.8, hi:5.2},{u:"10^12/L", lo:3.8, hi:5.2}] },
-  "Leukocitai":     { units:["x10^9/L","10^9/L"],   ranges:[{u:"x10^9/L", lo:4.0, hi:10.0},{u:"10^9/L", lo:4.0, hi:10.0}] },
-  "Trombocitai":    { units:["x10^9/L","10^9/L"],   ranges:[{u:"x10^9/L", lo:150, hi:400},{u:"10^9/L", lo:150, hi:400}] },
-  "CRP":            { units:["mg/L"],        ranges:[{u:"mg/L", lo:0,   hi:5}] },
-  "Feritinas":      { units:["µg/L","ng/mL"],ranges:[{u:"µg/L", lo:15,  hi:150},{u:"ng/mL", lo:15, hi:150}] },
-  "Gliukozė":       { units:["mmol/L","mg/dL"],ranges:[{u:"mmol/L", lo:3.9, hi:5.5},{u:"mg/dL", lo:70, hi:99}] },
-  "Cholesterolis":  { units:["mmol/L","mg/dL"],ranges:[{u:"mmol/L", lo:0, hi:5.0},{u:"mg/dL", lo:0, hi:200}] },
-  "HDL":            { units:["mmol/L","mg/dL"],ranges:[{u:"mmol/L", lo:1.0, hi:2.5},{u:"mg/dL", lo:40, hi:97}] },
-  "LDL":            { units:["mmol/L","mg/dL"],ranges:[{u:"mmol/L", lo:0, hi:3.0},{u:"mg/dL", lo:0, hi:116}] },
-  "Trigliceridai":  { units:["mmol/L","mg/dL"],ranges:[{u:"mmol/L", lo:0, hi:1.7},{u:"mg/dL", lo:0, hi:150}] },
-  "TSH":            { units:["mIU/L","µIU/mL"],ranges:[{u:"mIU/L", lo:0.4, hi:4.0},{u:"µIU/mL", lo:0.4, hi:4.0}] },
+  // WBC/PLT – papildyti /µL ir /cu.mm
+  "Leukocitai":     { units:["x10^9/L","10^9/L","/µL","/uL","/mm3","/cu.mm"], ranges:[
+    {u:"x10^9/L", lo:4.0, hi:10.0},{u:"10^9/L", lo:4.0, hi:10.0},
+    {u:"/µL", lo:4000, hi:11000},{u:"/uL", lo:4000, hi:11000},
+    {u:"/mm3", lo:4000, hi:11000},{u:"/cu.mm", lo:4000, hi:11000}
+  ]},
+  "Trombocitai":    { units:["x10^9/L","10^9/L","/µL","/uL","/mm3","/cu.mm"], ranges:[
+    {u:"x10^9/L", lo:150, hi:400},{u:"10^9/L", lo:150, hi:400},
+    {u:"/µL", lo:150000, hi:450000},{u:"/uL", lo:150000, hi:450000},
+    {u:"/mm3", lo:150000, hi:450000},{u:"/cu.mm", lo:150000, hi:450000}
+  ]},
+  "CRP":            { units:["mg/L"], ranges:[{u:"mg/L", lo:0, hi:5}] },
+  "Feritinas":      { units:["µg/L","ng/mL"], ranges:[{u:"µg/L", lo:15, hi:150},{u:"ng/mL", lo:15, hi:150}] },
+  "Gliukozė":       { units:["mmol/L","mg/dL"], ranges:[{u:"mmol/L", lo:3.9, hi:5.5},{u:"mg/dL", lo:70, hi:99}] },
+  "Cholesterolis":  { units:["mmol/L","mg/dL"], ranges:[{u:"mmol/L", lo:0, hi:5.0},{u:"mg/dL", lo:0, hi:200}] },
+  "HDL":            { units:["mmol/L","mg/dL"], ranges:[{u:"mmol/L", lo:1.0, hi:2.5},{u:"mg/dL", lo:40, hi:97}] },
+  "LDL":            { units:["mmol/L","mg/dL"], ranges:[{u:"mmol/L", lo:0, hi:3.0},{u:"mg/dL", lo:0, hi:116}] },
+  "Trigliceridai":  { units:["mmol/L","mg/dL"], ranges:[{u:"mmol/L", lo:0, hi:1.7},{u:"mg/dL", lo:0, hi:150}] },
+  "TSH":            { units:["mIU/L","µIU/mL"], ranges:[{u:"mIU/L", lo:0.4, hi:4.0},{u:"µIU/mL", lo:0.4, hi:4.0}] },
   "FT4":            { units:["pmol/L","ng/dL"], ranges:[{u:"pmol/L", lo:12, hi:22},{u:"ng/dL", lo:0.9, hi:1.7}] },
   "Vit D":          { units:["ng/mL","nmol/L"], ranges:[{u:"ng/mL", lo:20, hi:50},{u:"nmol/L", lo:50, hi:125}] },
-  // --- Krešumas (tipinės) ---
+  // Eritrocitų indeksai
+  "MCV":            { units:["fL","fl"], ranges:[{u:"fL", lo:80, hi:99},{u:"fl", lo:80, hi:99}] },
+  "MCH":            { units:["pg"],      ranges:[{u:"pg", lo:28, hi:32}] },
+  "MCHC":           { units:["g/dL"],    ranges:[{u:"g/dL", lo:30, hi:34}] },
+  // Krešumas
   "INR":            { units:["","vnt"], ranges:[{u:"", lo:0.8, hi:1.2},{u:"vnt", lo:0.8, hi:1.2}] },
   "Protrombino laikas (PT)": { units:["s","sek","sec"], ranges:[{u:"s", lo:11, hi:15},{u:"sek", lo:11, hi:15},{u:"sec", lo:11, hi:15}] },
   "aPTT":           { units:["s","sek","sec"], ranges:[{u:"s", lo:25, hi:35},{u:"sek", lo:25, hi:35},{u:"sec", lo:25, hi:35}] },
   "Fibrinogenas":   { units:["g/L"], ranges:[{u:"g/L", lo:2.0, hi:4.0}] },
-  "D-dimerai":      { units:["mg/L","mg/L FEU","µg/mL","µg/mL FEU"], ranges:[{u:"mg/L", lo:0, hi:0.5},{u:"mg/L FEU", lo:0, hi:0.5},{u:"µg/mL", lo:0, hi:0.5},{u:"µg/mL FEU", lo:0, hi:0.5}] },
+  "D-dimerai":      { units:["mg/L","mg/L FEU","µg/mL","µg/mL FEU"], ranges:[
+    {u:"mg/L", lo:0, hi:0.5},{u:"mg/L FEU", lo:0, hi:0.5},{u:"µg/mL", lo:0, hi:0.5},{u:"µg/mL FEU", lo:0, hi:0.5}
+  ]},
 };
 
+/* ====== Įkėlimas/valdymas ====== */
 const drop = $("drop"), input=$("fileInput"), startBtn=$("startBtn"), statusEl=$("status");
 const results = $("results"), tbody=$("tbody"), raw=$("raw"), exportCsv=$("exportCsv"), clearBtn=$("clearBtn");
 const coagWrap = $("coagWrap"), coagTbody = $("coagTbody");
@@ -211,29 +233,118 @@ let files=[];
 drop.addEventListener("drop",(e)=>{e.preventDefault(); drop.classList.remove("bg-gray-100"); files=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/")); statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių vaizdų.";});
 input.addEventListener("change",(e)=>{files=[...e.target.files]; statusEl.textContent=files.length?`Pasirinkta ${files.length} failas(-ai).`:"Nepasirinkta jokių vaizdų.";});
 
+/* ====== VAIZDO PAGERINIMAS PRIEŠ OCR ====== */
+async function fileToEnhancedBlob(file) {
+  const img = await new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = url;
+  });
+
+  const maxW = 2000;
+  const scale = Math.min(1, maxW / img.width);
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+
+  // Global threshold ~ adaptive-lite
+  let sum = 0;
+  for (let i=0;i<d.length;i+=4){
+    const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    sum += gray;
+  }
+  const avg = sum / (d.length/4);
+  const T = Math.max(110, Math.min(170, avg));
+
+  for (let i=0;i<d.length;i+=4){
+    const gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    const v = (gray > T) ? 255 : 0;
+    d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+  }
+  ctx.putImageData(imgData, 0, 0);
+
+  const blob = await new Promise(res => c.toBlob(res, "image/png", 1));
+  URL.revokeObjectURL(img.src);
+  return blob;
+}
+
+/* ====== Grupavimas į eilutes pagal bounding boxes ====== */
+function groupWordsIntoLines(words){
+  const good = words.filter(w => w.conf >= 60 && w.text && w.text.trim());
+  good.sort((a,b)=> a.y0 - b.y0 || a.x0 - b.x0);
+
+  const lines = [];
+  const TOL = 8;
+  for(const w of good){
+    let line = lines.find(L => Math.abs(L.y - w.y0) < TOL);
+    if(!line){ line = { y: w.y0, words: [] }; lines.push(line); }
+    line.words.push(w);
+  }
+  for(const L of lines){
+    L.words.sort((a,b)=> a.x0 - b.x0);
+    L.text = L.words.map(w=>w.text).join(" ");
+  }
+  return lines.map(L => L.text);
+}
+
+/* ====== OCR + analizė ====== */
 startBtn.addEventListener("click", async () => {
   if (!files.length){ statusEl.textContent="Įkelkite bent vieną nuotrauką."; return; }
   startBtn.disabled=true; tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden"); results.classList.remove("hidden"); statusEl.textContent="Vyksta OCR…";
   const useLt=$("langLt").checked, aggressive=$("aggressive").checked;
+
   try{
     const worker = await Tesseract.createWorker(useLt ? "lit+eng" : "eng", 1, {});
-    let allText="";
+    await worker.setParameters({
+      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.%/^-–—()µgdlpmnIUFLcu ",
+      preserve_interword_spaces: "1",
+      user_defined_dpi: "300",
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK
+    });
+
+    let allText = "";
+    let allWords = [];
+
     for(let i=0;i<files.length;i++){
       statusEl.textContent=`OCR ${i+1}/${files.length}…`;
-      const img = await files[i].arrayBuffer();
-      const { data:{ text }} = await worker.recognize(new Blob([img]));
-      allText += "\n\n===== FAILAS " + (i+1) + " =====\n" + text;
+      const enhanced = await fileToEnhancedBlob(files[i]);
+      const { data } = await worker.recognize(enhanced);
+      allText += "\n\n===== FAILAS " + (i+1) + " =====\n" + data.text;
+      allWords = allWords.concat(data.words.map(w => ({
+        text: w.text, x0:w.bbox.x0, y0:w.bbox.y0, x1:w.bbox.x1, y1:w.bbox.y1, conf:w.conf
+      })));
     }
     await worker.terminate();
+
     raw.textContent = allText.trim();
     statusEl.textContent="Analizuoju tekstą…";
-    const rows = analyzeText(allText,{aggressive});
+
+    const linesFromBBoxes = groupWordsIntoLines(allWords);
+    const rows = analyzeLines(linesFromBBoxes,{aggressive});
     renderRows(rows);
-    renderCoagAlert(rows); // <<< nauja
+    renderCoagAlert(rows);
     statusEl.textContent=`Rasta įrašų: ${rows.length}`;
-  }catch(err){ console.error(err); statusEl.textContent="Įvyko klaida apdorojant. Pamėginkite dar kartą."; }
-  finally{ startBtn.disabled=false; }
+  }catch(err){
+    console.error(err);
+    statusEl.textContent="Įvyko klaida apdorojant. Pamėginkite dar kartą.";
+  }finally{
+    startBtn.disabled=false;
+  }
 });
+
+function analyzeLines(lines,{aggressive=false}={}){
+  const text = lines.join("\n");
+  return analyzeText(text,{aggressive});
+}
 
 function analyzeText(text,{aggressive=false}={}){
   const lines = text.split(/\r?\n/).map(s=>s.replace(/\t+/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
@@ -316,7 +427,6 @@ function isCoagTest(name){
   return ["INR","Protrombino laikas (PT)","aPTT","Fibrinogenas","D-dimerai"].includes(name);
 }
 
-// Parodo krešumo perspėjimą, jei yra bent vienas nenormalus
 function renderCoagAlert(rows){
   const bad = rows.filter(r => isCoagTest(r.name) && (r.tag==="Aukštas" || r.tag==="Žemas"));
   if(!bad.length){ coagWrap.classList.add("hidden"); return; }
@@ -335,8 +445,13 @@ function renderCoagAlert(rows){
   coagWrap.classList.remove("hidden");
 }
 
-function escapeHtml(s){ return (s==null?"":String(s)).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+function escapeHtml(s){
+  return (s==null?"":String(s))
+    .replaceAll("&","&amp;").replaceAll("<","&lt;")
+    .replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
+}
 
+/* ====== Eksportas ir valdymas ====== */
 exportCsv.addEventListener("click", ()=>{
   const rows=[...tbody.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.replace(/\s+/g," ").trim()));
   const header=["Tyrimas","Reikšmė","Vienetai","Norma","Žyma","Pastaba","Šaltinis"];
