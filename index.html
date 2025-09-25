@@ -4,18 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kraujo tyrimų analizė (beta)</title>
-  <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas arba PDF ir gaukite informacinę suvestinę. Nediagnozuoja.">
+  <meta name="description" content="Įkelkite kraujo tyrimų nuotraukas arba PDF. OCR vyksta tik naršyklėje.">
   <!-- UI -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="icon" href="data:,">
-  <!-- OCR -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <!-- PDF -> canvas -->
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.js"></script>
   <style>
     .dropzone { border: 2px dashed rgba(0,0,0,0.2); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
+  <!-- OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- PDF -> canvas -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.js"></script>
 </head>
 <body class="bg-gray-50 text-gray-900 antialiased">
   <div class="max-w-5xl mx-auto p-4 sm:p-8">
@@ -117,7 +117,7 @@
       </details>
 
       <p class="text-xs text-gray-500 mt-3">
-        Pirmumas – laboratorijos dokumente nurodytoms riboms. Jei ribų nėra, taikomos atsargios „tipinės“ ribos su įspėjimu.
+        Pirmumas – laboratorijos dokumente nurodytoms riboms. Jei jų nėra, taikomos atsargios „tipinės“ ribos (pažymimos).
       </p>
     </section>
 
@@ -130,14 +130,24 @@
 /* === Pagalbinės === */
 const $ = (id) => document.getElementById(id);
 $("yr").textContent = new Date().getFullYear();
+
 const DEC = (s) => { if (s==null) return null; const x=(""+s).replace(/\s/g,"").replace(",","."); const n=Number(x); return Number.isFinite(n)?n:null; };
 const HL_RX    = /\b([HL])\b/;
 const RANGE_RX = /(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)/;
 
-// Išplėstas vienetų žodynas
-const UNIT_RX = /(g\/L|g\/dL|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|mg\/L|%|s|sec|sek|min|fL|fl|pg|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm)/i;
+/* Vienetai + normalizacija */
+const UNIT_RX = /(g\/L|g\/dL|g%|mmol\/L|mg\/dL|µg\/L|ng\/mL|mIU\/L|µIU\/mL|pmol\/L|ng\/dL|x?10\^9\/L|10\^9\/L|x?10\^12\/L|10\^12\/L|10\^3\/u?L|10\^9\/u?L|\/µL|\/uL|\/µl|\/ul|\/mm3|\/cu\.mm|mg\/L|%|s|sec|sek|min|fL|fl|pg)/i;
+function normalizeUnits(u){
+  if(!u) return u;
+  u = u.replace(/\s+/g,"");
+  if(/^g%$/i.test(u)) return "g/dL";
+  if(/^\/cu\.mm$/i.test(u)) return "/mm3";
+  if(/^\/u?l$/i.test(u)) return "/µL";
+  if(/^10\^3\/u?l$/i.test(u)) return "10^3/µL";
+  return u;
+}
 
-/* Pastabos (neutralios, ne-diagnostinės) */
+/* Pastabos (neutralios) */
 const NOTES = {
   "Hemoglobinas": {low:"Dažna priežastis – geležies stoka ar kraujavimas. Pasitarkite su gydytoju.", high:"Gali būti dehidratacija ar kitos būklės; vertinti kliniką."},
   "Feritinas": {low:"Dažnai rodo geležies trūkumą; vertinti su Hb/MCV/CRP.", high:"Gali kilti uždegimo metu; vertinti su CRP."},
@@ -153,23 +163,34 @@ const NOTES = {
   "D-dimerai": {high:"Padidėję D-dimerai būna įvairiose būklėse; vertinti kliniškai."}
 };
 
-/* Sinonimų žemėlapis */
+/* Daug išplėstų sinonimų */
 const TEST_MAP = [
-  {rx:/\b(HGB|Hb|hemoglobi?n(as)?)\b/i, name:"Hemoglobinas"},
-  {rx:/\b(HCT|hematokrit(as)?)\b/i, name:"Hematokritas"},
-  {rx:/\b(RBC|eritrocit(ai|ų)?)\b/i, name:"Eritrocitai"},
-  {rx:/\b(WBC|leukocit(ai|ų)?)\b/i, name:"Leukocitai"},
-  {rx:/\b(PLT|trombocit(ai|ų)?)\b/i, name:"Trombocitai"},
-  {rx:/\b(MCV)\b/i, name:"MCV"},
-  {rx:/\b(MCH)\b/i, name:"MCH"},
-  {rx:/\b(MCHC)\b/i, name:"MCHC"},
-  {rx:/\b(CRP)\b/i, name:"CRP"},
-  {rx:/\b(ferritin(as)?)\b/i, name:"Feritinas"},
+  // CBC baziniai
+  {rx:/\b(HGB|Hb|ha?emoglobi?n[eai]?s?)\b/i, name:"Hemoglobinas"}, // Hemoglobin/Haemoglobin/Hb
+  {rx:/\b(HCT|hematokrit(as)?|PCV)\b/i, name:"Hematokritas"},      // HCT/PCV
+  {rx:/\b(RBC(\s*Count)?|erythrocyt(es?|e)?|eritrocit(ai|ų)?)\b/i, name:"Eritrocitai"},
+  {rx:/\b((Total\s*)?WBC(\s*Count)?|leukocyt(es?|e)?|leukocit(ai|ų)?)\b/i, name:"Leukocitai"},
+  {rx:/\b(PLT|Platelet(\s*Count)?|trombocit(ai|ų)?)\b/i, name:"Trombocitai"},
+  // Eritrocitų indeksai
+  {rx:/\bMCV\b/i, name:"MCV"},
+  {rx:/\bMCH\b/i, name:"MCH"},
+  {rx:/\bMCHC\b/i, name:"MCHC"},
+  {rx:/\bRDW(-CV)?\b/i, name:"RDW-CV"},
+  {rx:/\bRDW-?SD\b/i, name:"RDW-SD"},
+  // Leukocitų diferencialas (rodysim, jei atpažins – be ribų)
+  {rx:/\bNEU[%#]?\b|\bNeutrophils?\b/i, name:"Neutrofilai"},
+  {rx:/\bLYM[%#]?\b|\bLymphocytes?\b/i, name:"Limfocitai"},
+  {rx:/\bMON[%#]?\b|\bMonocytes?\b/i, name:"Monocitai"},
+  {rx:/\bEOS[%#]?\b|\bEosinophils?\b/i, name:"Eozinofilai"},
+  {rx:/\bBAS[%#]?\b|\bBasophils?\b/i, name:"Bazofilai"},
+  // Biochemija / kiti
   {rx:/\b(glucose|gliukoz[ėe]|Glu)\b/i, name:"Gliukozė"},
+  {rx:/\bCRP\b/i, name:"CRP"},
+  {rx:/\bferritin(as)?\b/i, name:"Feritinas"},
   {rx:/\b(total\s*chol|cholesterol(is)?|chol\b)\b/i, name:"Cholesterolis"},
   {rx:/\bHDL\b/i, name:"HDL"},
   {rx:/\bLDL\b/i, name:"LDL"},
-  {rx:/\btriglicerid(ai|ų)|\bTG\b/i, name:"Trigliceridai"},
+  {rx:/\btriglycerid(es)?|triglicerid(ai|ų)|\bTG\b/i, name:"Trigliceridai"},
   {rx:/\bTSH\b/i, name:"TSH"},
   {rx:/\bFT4\b/i, name:"FT4"},
   {rx:/\bVit(\.?|aminas\s*)D\b/i, name:"Vit D"},
@@ -181,20 +202,20 @@ const TEST_MAP = [
   {rx:/\bD[\s-]?dimer(ai|ų)?\b/i, name:"D-dimerai"},
 ];
 
-/* Tipinės (atsargios) ribos – pirmenybė laboratorijos nurodytoms */
+/* Tipinės (atsargios) ribos – pirmenybė laboratorijos riboms */
 const TYPICAL = {
-  "Hemoglobinas":   { units:["g/L","g/dL"], ranges:[{u:"g/L", lo:120, hi:160},{u:"g/dL", lo:12, hi:16}] },
+  "Hemoglobinas":   { units:["g/dL","g/L"], ranges:[{u:"g/dL", lo:12, hi:16},{u:"g/L", lo:120, hi:160}] },
   "Hematokritas":   { units:["%"], ranges:[{u:"%", lo:36, hi:46}] },
   "Eritrocitai":    { units:["x10^12/L","10^12/L"], ranges:[{u:"x10^12/L", lo:3.8, hi:5.2},{u:"10^12/L", lo:3.8, hi:5.2}] },
-  "Leukocitai":     { units:["x10^9/L","10^9/L","/µL","/uL","/mm3","/cu.mm"], ranges:[
+  "Leukocitai":     { units:["x10^9/L","10^9/L","/µL","/mm3","10^3/µL"], ranges:[
     {u:"x10^9/L", lo:4.0, hi:10.0},{u:"10^9/L", lo:4.0, hi:10.0},
-    {u:"/µL", lo:4000, hi:11000},{u:"/uL", lo:4000, hi:11000},
-    {u:"/mm3", lo:4000, hi:11000},{u:"/cu.mm", lo:4000, hi:11000}
+    {u:"/µL", lo:4000, hi:11000},{u:"/mm3", lo:4000, hi:11000},
+    {u:"10^3/µL", lo:4.0, hi:11.0}
   ]},
-  "Trombocitai":    { units:["x10^9/L","10^9/L","/µL","/uL","/mm3","/cu.mm"], ranges:[
+  "Trombocitai":    { units:["x10^9/L","10^9/L","/µL","/mm3","10^3/µL"], ranges:[
     {u:"x10^9/L", lo:150, hi:400},{u:"10^9/L", lo:150, hi:400},
-    {u:"/µL", lo:150000, hi:450000},{u:"/uL", lo:150000, hi:450000},
-    {u:"/mm3", lo:150000, hi:450000},{u:"/cu.mm", lo:150000, hi:450000}
+    {u:"/µL", lo:150000, hi:450000},{u:"/mm3", lo:150000, hi:450000},
+    {u:"10^3/µL", lo:150, hi:450}
   ]},
   "CRP":            { units:["mg/L"], ranges:[{u:"mg/L", lo:0, hi:5}] },
   "Feritinas":      { units:["µg/L","ng/mL"], ranges:[{u:"µg/L", lo:15, hi:150},{u:"ng/mL", lo:15, hi:150}] },
@@ -282,9 +303,9 @@ async function pdfToImageBlobs(file, scale = 2.0) {
 
 /* Iš žodžių (bbox) sudedame eilutes */
 function groupWordsIntoLines(words){
-  const good = words.filter(w => w.conf >= 60 && w.text && w.text.trim());
+  const good = words.filter(w => (w.conf ?? 0) >= 40 && w.text && w.text.trim());
   good.sort((a,b)=> a.y0 - b.y0 || a.x0 - b.x0);
-  const lines = [], TOL = 8;
+  const lines = [], TOL = 10;
   for(const w of good){
     let line = lines.find(L => Math.abs(L.y - w.y0) < TOL);
     if(!line){ line = { y: w.y0, words: [] }; lines.push(line); }
@@ -356,6 +377,7 @@ startBtn.addEventListener("click", async () => {
 
 function analyzeLines(lines,{aggressive=false}={}){ return analyzeText(lines.join("\n"),{aggressive}); }
 
+/* Parsinimas (ieško reikšmės ir gretimose eilutėse) */
 function analyzeText(text,{aggressive=false}={}){
   const lines = text.split(/\r?\n/).map(s=>s.replace(/\t+/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
   const results=[], windowSize=2;
@@ -367,9 +389,22 @@ function analyzeText(text,{aggressive=false}={}){
 
     let value=null, units=null, flag=null;
     const hl=line.match(HL_RX); if(hl) flag=hl[1].toUpperCase()==="H"?"H":"L";
-    const vm=line.match(/(-?\d+(?:[.,]\d+)?)/); if(vm) value=DEC(vm[1]);
-    const um=line.match(UNIT_RX); if(um) units=um[1];
 
+    // Reikšmė šioje arba sekančiose 1–2 eilutėse
+    let m = line.match(/(-?\d+(?:[.,]\d+)?)/);
+    if (m) value = DEC(m[1]);
+    if (value==null) {
+      for (let k=1; k<=2 && i+k<lines.length; k++){
+        const cand = lines[i+k];
+        const mm = cand.match(/(-?\d+(?:[.,]\d+)?)/);
+        if (mm) { value = DEC(mm[1]); const um2 = cand.match(UNIT_RX); if (um2) units = normalizeUnits(um2[1]); break; }
+      }
+    }
+
+    // Vienetai
+    const um=line.match(UNIT_RX); if(um) units=normalizeUnits(um[1]);
+
+    // Ribos – ši/greta
     let lo=null, hi=null, rangeText=null, r=line.match(RANGE_RX);
     if(!r){
       for(let k=1;k<=windowSize && i+k<lines.length;k++){ r=lines[i+k].match(RANGE_RX); if(r) break; }
@@ -377,6 +412,7 @@ function analyzeText(text,{aggressive=false}={}){
     }
     if(r){ lo=DEC(r[1]); hi=DEC(r[2]); rangeText=`${r[1]}–${r[2]}`; }
 
+    // Tipinės ribos – jei laboratorija nenurodė
     let usedTypical=false;
     if((lo==null || hi==null) && name in TYPICAL){
       const t=TYPICAL[name];
@@ -412,7 +448,9 @@ function analyzeText(text,{aggressive=false}={}){
   return [...merged.values()];
 }
 
+/* Atvaizdavimas */
 function renderRows(rows){
+  const tbody = $("tbody");
   tbody.innerHTML="";
   for(const r of rows){
     const color = r.tag==="Aukštas"?"bg-red-50 text-red-700" : r.tag==="Žemas"?"bg-yellow-50 text-yellow-700" : r.tag==="Normoje"?"bg-green-50 text-green-700":"bg-gray-50 text-gray-700";
@@ -461,7 +499,7 @@ function escapeHtml(s){
 
 /* Eksportas / valdymas */
 exportCsv.addEventListener("click", ()=>{
-  const rows=[...tbody.querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.replace(/\s+/g," ").trim()));
+  const rows=[...$("tbody").querySelectorAll("tr")].map(tr=>[...tr.children].map(td=>td.textContent.replace(/\s+/g," ").trim()));
   const header=["Tyrimas","Reikšmė","Vienetai","Norma","Žyma","Pastaba","Šaltinis"];
   const data=[header,...rows];
   const csv=data.map(r=>r.map(v=>`"${v.replaceAll('"','""')}"`).join(",")).join("\n");
@@ -469,7 +507,7 @@ exportCsv.addEventListener("click", ()=>{
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="tyrimai.csv"; a.click(); URL.revokeObjectURL(a.href);
 });
 clearBtn.addEventListener("click", ()=>{
-  tbody.innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden");
+  $("tbody").innerHTML=""; raw.textContent=""; coagTbody.innerHTML=""; coagWrap.classList.add("hidden");
   statusEl.textContent="Išvalyta. Galite įkelti naujus failus.";
 });
 </script>
